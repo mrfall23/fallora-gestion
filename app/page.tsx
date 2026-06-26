@@ -1,65 +1,100 @@
-import Image from "next/image";
+'use client';
+import { useState } from 'react';
+import { supabase } from '@/lib/supabase';
+import { useRouter } from 'next/navigation';
 
 export default function Home() {
+  const [email, setEmail] = useState('');
+  const [motDePasse, setMotDePasse] = useState('');
+  const [erreur, setErreur] = useState('');
+  const [chargement, setChargement] = useState(false);
+  const router = useRouter();
+  
+
+  const connecter = async () => {
+  if (!email || !motDePasse) {
+    setErreur('Veuillez remplir tous les champs.');
+    return;
+  }
+  setChargement(true);
+  setErreur('');
+  try {
+    const { data, error } = await supabase
+      .from('utilisateurs')
+      .select('*')
+      .eq('email', email)
+      .single();
+
+    if (error || !data) {
+      setErreur('Email ou mot de passe incorrect.');
+      setChargement(false);
+      return;
+    }
+
+    if (data.mot_de_passe !== motDePasse) {
+      setErreur('Email ou mot de passe incorrect.');
+      setChargement(false);
+      return;
+    }
+
+    localStorage.setItem('fallora_user', JSON.stringify(data));
+    document.cookie = `fallora_role=${data.role}; path=/; max-age=86400; SameSite=Strict`;
+
+    if (data.role === 'admin') {
+      router.push('/admin');
+    } else {
+      router.push('/vendeuse');
+    }
+  } catch (e) {
+    setErreur('Erreur reseau. Veuillez reessayer.');
+    setChargement(false);
+  }
+};
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="min-h-screen bg-amber-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-lg p-8 w-full max-w-md">
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-bold text-amber-800 tracking-widest">Fallora</h1>
+          <p className="text-amber-600 text-sm mt-1">Gestion Ventes Privees</p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        {erreur && (
+          <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 mb-4 text-sm text-center">
+            {erreur}
+          </div>
+        )}
+
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="votre@email.com"
+            className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-amber-400"
+          />
         </div>
-      </main>
+
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-gray-700 mb-2">Mot de passe</label>
+          <input
+            type="password"
+            value={motDePasse}
+            onChange={(e) => setMotDePasse(e.target.value)}
+            placeholder="••••••••"
+            className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-amber-400"
+          />
+        </div>
+
+        <button
+          onClick={connecter}
+          disabled={chargement}
+          className="w-full bg-amber-700 text-white py-3 rounded-xl font-bold text-sm hover:bg-amber-800 transition disabled:opacity-50"
+        >
+          {chargement ? 'Connexion...' : 'Se connecter'}
+        </button>
+      </div>
     </div>
   );
 }
