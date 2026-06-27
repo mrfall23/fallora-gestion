@@ -149,6 +149,13 @@ export default function AdminDashboard() {
               <p className="text-sm text-gray-500">Performance de chaque vendeuse</p>
             </div>
           </a>
+          <a href="/admin/clients" className="bg-white rounded-2xl p-4 shadow border border-amber-100 flex items-center gap-4 hover:bg-amber-50 transition">
+            <FaUsers size={28} className="text-amber-700" />
+            <div>
+              <p className="font-bold text-amber-800">Clientes</p>
+              <p className="text-sm text-gray-500">Historique et profil de chaque cliente</p>
+            </div>
+          </a>
           <a href="/admin/rapports" className="bg-white rounded-2xl p-4 shadow border border-amber-100 flex items-center gap-4 hover:bg-amber-50 transition">
             <FaFileExcel size={28} className="text-amber-700" />
             <div>
