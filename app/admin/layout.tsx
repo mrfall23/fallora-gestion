@@ -9,6 +9,7 @@ const NAV = [
   { href: '/admin/vendeuses', icon: 'emoji_events', label: 'Vendeuses' },
   { href: '/admin/clients', icon: 'people', label: 'Clientes' },
   { href: '/admin/rapports', icon: 'download', label: 'Rapports' },
+  { href: '/admin/parametres', icon: 'manage_accounts', label: 'Comptes' },
 ];
 
 const TITRES: Record<string, [string, string]> = {
@@ -18,6 +19,7 @@ const TITRES: Record<string, [string, string]> = {
   '/admin/vendeuses': ['Performance des vendeuses', 'Classement et statistiques du mois'],
   '/admin/clients': ['Clientes', 'Profils et historique des achats'],
   '/admin/rapports': ['Rapports', 'Exportez vos données au format Excel'],
+  '/admin/parametres': ['Gestion des comptes', 'Ajouter et gérer les vendeuses'],
 };
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
