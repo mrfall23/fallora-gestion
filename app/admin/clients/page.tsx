@@ -1,20 +1,11 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { FaArrowLeft, FaUsers, FaSearch, FaPhoneAlt, FaShoppingBag } from 'react-icons/fa';
-import { MdAttachMoney, MdAccessTime } from 'react-icons/md';
 import { supabase } from '@/lib/supabase';
 
-type Cliente = {
-  id: number;
-  nom: string;
-  telephone: string | null;
-  created_at: string;
-  nbVentes: number;
-  totalDepense: number;
-  resteAPayer: number;
-  derniereVisite: string | null;
-};
+type Cliente = { id: number; nom: string; telephone: string | null; created_at: string; nbVentes: number; totalDepense: number; resteAPayer: number; derniereVisite: string | null };
+
+const BADGE_PAID = { fontSize: '12px', fontWeight: 700, color: '#5BBF89', background: 'rgba(91,191,137,.13)', border: '1px solid rgba(91,191,137,.25)', padding: '4px 10px', borderRadius: '20px' } as const;
+const BADGE_PART = { fontSize: '12px', fontWeight: 700, color: '#F0C040', background: 'rgba(240,192,64,.13)', border: '1px solid rgba(240,192,64,.28)', padding: '4px 10px', borderRadius: '20px' } as const;
 
 export default function AdminClients() {
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -23,326 +14,186 @@ export default function AdminClients() {
   const [clienteSelectee, setClienteSelectee] = useState<Cliente | null>(null);
   const [ventesCliente, setVentesCliente] = useState<any[]>([]);
   const [chargementDetail, setChargementDetail] = useState(false);
-  const router = useRouter();
 
-  useEffect(() => {
-    const userData = localStorage.getItem('fallora_user');
-    if (!userData) { router.push('/'); return; }
-    const parsed = JSON.parse(userData);
-    if (parsed.role !== 'admin') { router.push('/'); return; }
-    chargerClientes();
-  }, []);
+  useEffect(() => { chargerClientes(); }, []);
 
   const chargerClientes = async () => {
-    // 1. Toutes les clientes
-    const { data: clientesData } = await supabase
-      .from('clientes')
-      .select('*')
-      .order('nom');
-
-    if (!clientesData || clientesData.length === 0) {
-      setClientes([]);
-      setChargement(false);
-      return;
-    }
-
-    // 2. Ventes non annulees
+    const { data: clientesData } = await supabase.from('clientes').select('*').order('nom');
+    if (!clientesData || clientesData.length === 0) { setClientes([]); setChargement(false); return; }
     const clienteIds = clientesData.map((c: any) => c.id);
-    const { data: ventes } = await supabase
-      .from('ventes')
-      .select('id, cliente_id, total, reste_a_payer, date_vente')
-      .eq('annulee', false)
-      .in('cliente_id', clienteIds);
-
-    // 3. Calcul des stats par cliente
-    const clientesAvecStats: Cliente[] = clientesData.map((c: any) => {
-      const ventesCliente = (ventes || []).filter((v: any) => v.cliente_id === c.id);
-      const nbVentes = ventesCliente.length;
-      const totalDepense = ventesCliente.reduce((sum: number, v: any) => sum + v.total, 0);
-      const resteAPayer = ventesCliente.reduce((sum: number, v: any) => sum + v.reste_a_payer, 0);
-      const dates = ventesCliente.map((v: any) => v.date_vente).sort().reverse();
-      return {
-        ...c,
-        nbVentes,
-        totalDepense,
-        resteAPayer,
-        derniereVisite: dates[0] || null,
-      };
-    });
-
-    setClientes(clientesAvecStats);
+    const { data: ventes } = await supabase.from('ventes').select('id, cliente_id, total, reste_a_payer, date_vente').eq('annulee', false).in('cliente_id', clienteIds);
+    setClientes(clientesData.map((c: any) => {
+      const vv = (ventes || []).filter((v: any) => v.cliente_id === c.id);
+      const dates = vv.map((v: any) => v.date_vente).sort().reverse();
+      return { ...c, nbVentes: vv.length, totalDepense: vv.reduce((s: number, v: any) => s + v.total, 0), resteAPayer: vv.reduce((s: number, v: any) => s + v.reste_a_payer, 0), derniereVisite: dates[0] || null };
+    }));
     setChargement(false);
   };
 
-  const voirDetailCliente = async (cliente: Cliente) => {
-    if (clienteSelectee?.id === cliente.id) {
-      setClienteSelectee(null);
-      setVentesCliente([]);
-      return;
-    }
-    setClienteSelectee(cliente);
-    setChargementDetail(true);
-
-    // Ventes de cette cliente
-    const { data: ventesData } = await supabase
-      .from('ventes')
-      .select('*')
-      .eq('cliente_id', cliente.id)
-      .eq('annulee', false)
-      .order('date_vente', { ascending: false });
-
-    if (!ventesData || ventesData.length === 0) {
-      setVentesCliente([]);
-      setChargementDetail(false);
-      return;
-    }
-
-    // Produits de ces ventes
+  const voirDetail = async (c: Cliente) => {
+    if (clienteSelectee?.id === c.id) { setClienteSelectee(null); setVentesCliente([]); return; }
+    setClienteSelectee(c); setChargementDetail(true);
+    const { data: ventesData } = await supabase.from('ventes').select('*').eq('cliente_id', c.id).eq('annulee', false).order('date_vente', { ascending: false });
+    if (!ventesData || ventesData.length === 0) { setVentesCliente([]); setChargementDetail(false); return; }
     const venteIds = ventesData.map((v: any) => v.id);
-    const { data: venteProduits } = await supabase
-      .from('vente_produits')
-      .select('*')
-      .in('vente_id', venteIds);
-
-    const produitIds = [...new Set((venteProduits || []).map((vp: any) => vp.produit_id))];
-    const { data: produits } = produitIds.length > 0
-      ? await supabase.from('produits').select('id, nom').in('id', produitIds)
-      : { data: [] };
-
-    // Vendeuses
+    const { data: vp } = await supabase.from('vente_produits').select('*').in('vente_id', venteIds);
+    const produitIds = [...new Set((vp || []).map((x: any) => x.produit_id))];
+    const { data: produits } = produitIds.length > 0 ? await supabase.from('produits').select('id, nom').in('id', produitIds) : { data: [] };
     const userIds = [...new Set(ventesData.map((v: any) => v.vendeuse_id))];
-    const { data: utilisateurs } = await supabase
-      .from('utilisateurs')
-      .select('id, nom')
-      .in('id', userIds);
-
-    const ventesAssemblees = ventesData.map((v: any) => ({
-      ...v,
-      utilisateurs: (utilisateurs || []).find((u: any) => u.id === v.vendeuse_id) || null,
-      vente_produits: (venteProduits || [])
-        .filter((vp: any) => vp.vente_id === v.id)
-        .map((vp: any) => ({
-          ...vp,
-          produits: (produits || []).find((p: any) => p.id === vp.produit_id) || null,
-        })),
-    }));
-
-    setVentesCliente(ventesAssemblees);
+    const { data: utilisateurs } = userIds.length > 0 ? await supabase.from('utilisateurs').select('id, nom').in('id', userIds) : { data: [] };
+    setVentesCliente(ventesData.map((v: any) => ({ ...v, utilisateurs: (utilisateurs || []).find((u: any) => u.id === v.vendeuse_id) || null, vente_produits: (vp || []).filter((x: any) => x.vente_id === v.id).map((x: any) => ({ ...x, produits: (produits || []).find((p: any) => p.id === x.produit_id) || null })) })));
     setChargementDetail(false);
   };
 
-  const clientesFiltrees = clientes.filter(c =>
-    c.nom.toLowerCase().includes(recherche.toLowerCase()) ||
-    (c.telephone && c.telephone.includes(recherche))
-  );
-
-  const totalClientes = clientes.length;
-  const totalCA = clientes.reduce((sum, c) => sum + c.totalDepense, 0);
-  const totalEnAttente = clientes.reduce((sum, c) => sum + c.resteAPayer, 0);
+  const filtrees = clientes.filter(c => c.nom.toLowerCase().includes(recherche.toLowerCase()) || (c.telephone && c.telephone.includes(recherche)));
+  const totalCA = clientes.reduce((s, c) => s + c.totalDepense, 0);
+  const totalAttente = clientes.reduce((s, c) => s + c.resteAPayer, 0);
 
   return (
-    <div className="min-h-screen bg-amber-50">
-      <nav className="bg-amber-800 text-white px-6 py-4 flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <button onClick={() => router.push('/admin')} className="hover:bg-amber-700 p-2 rounded-lg">
-            <FaArrowLeft size={16} />
-          </button>
-          <FaUsers size={22} />
-          <h1 className="text-xl font-bold">Gestion des Clientes</h1>
-        </div>
-      </nav>
-
-      <div className="p-6 max-w-6xl mx-auto">
-
-        {/* STATS */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
-          <div className="bg-white rounded-2xl p-4 shadow border border-amber-100 text-center">
-            <FaUsers size={20} className="text-amber-600 mx-auto mb-1" />
-            <p className="text-2xl font-bold text-amber-800">{totalClientes}</p>
-            <p className="text-sm text-gray-500">Clientes</p>
+    <div className="fade-up">
+      {/* Stats */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '16px', marginBottom: '20px' }}>
+        {[
+          { icon: 'people', label: 'Clientes', value: clientes.length.toString(), color: '#F5F5F0' },
+          { icon: 'payments', label: 'CA Total FCFA', value: totalCA.toLocaleString(), color: '#5BBF89' },
+          { icon: 'pending_actions', label: 'En attente FCFA', value: totalAttente.toLocaleString(), color: '#F0C040' },
+        ].map(s => (
+          <div key={s.label} style={{ padding: '20px', borderRadius: '18px', background: 'rgba(255,255,255,.035)', border: '1px solid rgba(212,175,55,.12)', display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <div style={{ width: '44px', height: '44px', borderRadius: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg,rgba(240,192,64,.18),rgba(212,175,55,.06))', border: '1px solid rgba(212,175,55,.2)', flexShrink: 0 }}>
+              <span className="ms" style={{ fontSize: '22px', color: '#F0C040' }}>{s.icon}</span>
+            </div>
+            <div>
+              <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '.4px', color: 'rgba(245,245,240,.5)', textTransform: 'uppercase' as const }}>{s.label}</div>
+              <div style={{ fontSize: '20px', fontWeight: 800, color: s.color }}>{s.value}</div>
+            </div>
           </div>
-          <div className="bg-white rounded-2xl p-4 shadow border border-green-100 text-center">
-            <MdAttachMoney size={22} className="text-green-600 mx-auto mb-1" />
-            <p className="text-2xl font-bold text-green-700">{totalCA.toLocaleString()}</p>
-            <p className="text-sm text-gray-500">CA Total FCFA</p>
-          </div>
-          <div className="bg-white rounded-2xl p-4 shadow border border-orange-100 text-center">
-            <MdAttachMoney size={22} className="text-orange-500 mx-auto mb-1" />
-            <p className="text-2xl font-bold text-orange-500">{totalEnAttente.toLocaleString()}</p>
-            <p className="text-sm text-gray-500">En attente FCFA</p>
-          </div>
-        </div>
+        ))}
+      </div>
 
-        {/* RECHERCHE */}
-        <div className="relative mb-4">
-          <FaSearch size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Rechercher par nom ou telephone..."
-            value={recherche}
-            onChange={e => setRecherche(e.target.value)}
-            className="w-full bg-white border border-amber-100 rounded-xl pl-10 pr-4 py-3 text-sm shadow focus:outline-none focus:border-amber-400"
-          />
-        </div>
+      {/* Recherche */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', height: '48px', padding: '0 16px', borderRadius: '14px', background: 'rgba(0,0,0,.3)', border: '1px solid rgba(255,255,255,.08)', marginBottom: '16px' }}>
+        <span className="ms" style={{ fontSize: '20px', color: 'rgba(245,245,240,.4)' }}>search</span>
+        <input value={recherche} onChange={e => setRecherche(e.target.value)} placeholder="Rechercher par nom ou téléphone..." style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: '#F5F5F0', fontSize: '14px' }} />
+      </div>
 
-        {/* LAYOUT 2 COLONNES */}
-        <div className={`${clienteSelectee ? 'grid grid-cols-2 gap-4' : ''}`}>
-
-          {/* LISTE CLIENTES */}
-          <div>
-            {chargement ? (
-              <div className="text-center py-12 text-amber-600">Chargement...</div>
-            ) : clientesFiltrees.length === 0 ? (
-              <div className="bg-white rounded-2xl p-8 text-center shadow">
-                <FaUsers size={48} className="text-amber-200 mx-auto mb-3" />
-                <p className="text-gray-500">
-                  {recherche ? 'Aucune cliente trouvee pour cette recherche.' : 'Aucune cliente enregistree.'}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {clientesFiltrees.map(cliente => (
-                  <button
-                    key={cliente.id}
-                    onClick={() => voirDetailCliente(cliente)}
-                    className={`w-full bg-white rounded-2xl shadow border p-4 text-left transition ${
-                      clienteSelectee?.id === cliente.id
-                        ? 'border-amber-400 bg-amber-50'
-                        : 'border-amber-100 hover:bg-amber-50'
-                    }`}>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-amber-800 font-bold text-lg shrink-0">
-                          {cliente.nom.charAt(0).toUpperCase()}
-                        </div>
-                        <div>
-                          <p className="font-bold text-amber-800">{cliente.nom}</p>
-                          {cliente.telephone ? (
-                            <div className="flex items-center gap-1 text-xs text-gray-400">
-                              <FaPhoneAlt size={10} />
-                              <span>{cliente.telephone}</span>
-                            </div>
-                          ) : (
-                            <p className="text-xs text-gray-300">Pas de telephone</p>
-                          )}
-                        </div>
+      {/* 2-col layout */}
+      <div style={{ display: 'grid', gridTemplateColumns: clienteSelectee ? '1fr 380px' : '1fr', gap: '16px', alignItems: 'start' }}>
+        {/* Liste */}
+        <div>
+          {chargement ? (
+            <div style={{ textAlign: 'center', padding: '60px', color: 'rgba(245,245,240,.4)' }}>Chargement...</div>
+          ) : filtrees.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '60px', color: 'rgba(245,245,240,.4)' }}>
+              <span className="ms" style={{ fontSize: '48px', display: 'block', marginBottom: '12px', color: 'rgba(212,175,55,.3)' }}>people</span>
+              {recherche ? 'Aucune cliente trouvée.' : 'Aucune cliente enregistrée.'}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {filtrees.map(c => (
+                <button key={c.id} onClick={() => voirDetail(c)} style={{ width: '100%', padding: '16px 20px', borderRadius: '18px', background: clienteSelectee?.id === c.id ? 'rgba(212,175,55,.08)' : 'rgba(255,255,255,.035)', border: `1px solid ${clienteSelectee?.id === c.id ? 'rgba(212,175,55,.35)' : 'rgba(255,255,255,.06)'}`, backdropFilter: 'blur(20px)', cursor: 'pointer', textAlign: 'left', transition: 'all .15s' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                      <div style={{ width: '42px', height: '42px', borderRadius: '13px', background: 'linear-gradient(135deg,#262420,#191815)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(212,175,55,.2)', flexShrink: 0 }}>
+                        <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '20px', color: '#D4AF37', fontWeight: 600 }}>{c.nom[0].toUpperCase()}</span>
                       </div>
-                      <div className="text-right">
-                        <p className="font-bold text-amber-800 text-sm">{cliente.totalDepense.toLocaleString()} FCFA</p>
-                        <div className="flex items-center gap-2 justify-end mt-0.5">
-                          <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">
-                            {cliente.nbVentes} achat{cliente.nbVentes > 1 ? 's' : ''}
-                          </span>
-                          {cliente.resteAPayer > 0 && (
-                            <span className="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full font-semibold">
-                              -{cliente.resteAPayer.toLocaleString()} FCFA
-                            </span>
-                          )}
-                        </div>
+                      <div>
+                        <div style={{ fontSize: '14.5px', fontWeight: 600, color: '#F5F5F0' }}>{c.nom}</div>
+                        {c.telephone ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: 'rgba(245,245,240,.4)' }}>
+                            <span className="ms" style={{ fontSize: '13px' }}>phone</span>{c.telephone}
+                          </div>
+                        ) : <div style={{ fontSize: '12px', color: 'rgba(245,245,240,.25)' }}>Pas de téléphone</div>}
                       </div>
                     </div>
-                    {cliente.derniereVisite && (
-                      <div className="flex items-center gap-1 mt-2 text-xs text-gray-400">
-                        <MdAccessTime size={12} />
-                        <span>Derniere visite : {new Date(cliente.derniereVisite).toLocaleDateString('fr-FR')}</span>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '15px', fontWeight: 700, color: '#F5F5F0' }}>{c.totalDepense.toLocaleString()} <span style={{ fontSize: '11px', color: '#D4AF37' }}>FCFA</span></div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'flex-end', marginTop: '4px' }}>
+                        <span style={{ fontSize: '11.5px', background: 'rgba(212,175,55,.12)', color: '#D4AF37', padding: '3px 9px', borderRadius: '20px', fontWeight: 600 }}>{c.nbVentes} achat{c.nbVentes > 1 ? 's' : ''}</span>
+                        {c.resteAPayer > 0 && <span style={{ fontSize: '11.5px', background: 'rgba(240,192,64,.13)', color: '#F0C040', padding: '3px 9px', borderRadius: '20px', fontWeight: 600 }}>-{c.resteAPayer.toLocaleString()}</span>}
                       </div>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* DETAIL CLIENTE */}
-          {clienteSelectee && (
-            <div className="bg-white rounded-2xl shadow border border-amber-200 overflow-hidden h-fit sticky top-4">
-              <div className="bg-amber-800 text-white p-4">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-12 h-12 rounded-full bg-amber-600 flex items-center justify-center text-white font-bold text-xl">
-                    {clienteSelectee.nom.charAt(0).toUpperCase()}
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-bold text-lg">{clienteSelectee.nom}</p>
-                    {clienteSelectee.telephone ? (
-                      <div className="flex items-center gap-1 text-amber-300 text-sm">
-                        <FaPhoneAlt size={11} />
-                        <span>{clienteSelectee.telephone}</span>
-                      </div>
-                    ) : (
-                      <p className="text-amber-400 text-sm">Pas de telephone</p>
-                    )}
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-2 text-center">
-                  <div className="bg-amber-700 rounded-xl p-2">
-                    <p className="text-xl font-bold">{clienteSelectee.nbVentes}</p>
-                    <p className="text-xs text-amber-300">Achats</p>
-                  </div>
-                  <div className="bg-amber-700 rounded-xl p-2">
-                    <p className="text-sm font-bold">{clienteSelectee.totalDepense.toLocaleString()}</p>
-                    <p className="text-xs text-amber-300">Total FCFA</p>
-                  </div>
-                  <div className={`rounded-xl p-2 ${clienteSelectee.resteAPayer > 0 ? 'bg-orange-600' : 'bg-green-700'}`}>
-                    <p className="text-sm font-bold">{clienteSelectee.resteAPayer.toLocaleString()}</p>
-                    <p className="text-xs text-white/80">Reste</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <FaShoppingBag size={14} className="text-amber-600" />
-                  <h3 className="font-bold text-amber-800 text-sm">Historique des achats</h3>
-                </div>
-
-                {chargementDetail ? (
-                  <p className="text-center text-amber-600 text-sm py-4">Chargement...</p>
-                ) : ventesCliente.length === 0 ? (
-                  <p className="text-center text-gray-400 text-sm py-4">Aucun achat.</p>
-                ) : (
-                  <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
-                    {ventesCliente.map(vente => (
-                      <div key={vente.id} className="border border-amber-100 rounded-xl p-3">
-                        <div className="flex justify-between items-start mb-2">
-                          <div>
-                            <p className="text-xs text-gray-400">
-                              {new Date(vente.date_vente).toLocaleDateString('fr-FR', {
-                                day: '2-digit', month: 'short', year: 'numeric'
-                              })}
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              par {vente.utilisateurs?.nom || 'Inconnue'}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <p className="font-bold text-amber-800 text-sm">{vente.total?.toLocaleString()} FCFA</p>
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
-                              vente.statut_paiement === 'paye'
-                                ? 'bg-green-100 text-green-700'
-                                : 'bg-orange-100 text-orange-600'
-                            }`}>
-                              {vente.statut_paiement === 'paye' ? 'Paye' : `Reste : ${vente.reste_a_payer?.toLocaleString()} FCFA`}
-                            </span>
-                          </div>
-                        </div>
-                        {vente.vente_produits?.length > 0 && (
-                          <div className="border-t border-amber-50 pt-2 space-y-0.5">
-                            {vente.vente_produits.map((vp: any, i: number) => (
-                              <div key={i} className="flex justify-between text-xs text-gray-600">
-                                <span>{vp.produits?.nom || 'Inconnu'} <span className="text-amber-600 font-bold">x{vp.quantite}</span></span>
-                                <span className="font-semibold">{(vp.prix_unitaire * vp.quantite).toLocaleString()} FCFA</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                  {c.derniereVisite && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '8px', fontSize: '11.5px', color: 'rgba(245,245,240,.35)' }}>
+                      <span className="ms" style={{ fontSize: '13px' }}>schedule</span>
+                      Dernière visite : {new Date(c.derniereVisite).toLocaleDateString('fr-FR')}
+                    </div>
+                  )}
+                </button>
+              ))}
             </div>
           )}
         </div>
+
+        {/* Detail */}
+        {clienteSelectee && (
+          <div style={{ position: 'sticky', top: '100px', borderRadius: '20px', background: 'rgba(255,255,255,.04)', border: '1px solid rgba(212,175,55,.2)', backdropFilter: 'blur(22px)', boxShadow: '0 12px 40px rgba(0,0,0,.35)', overflow: 'hidden' }}>
+            <div style={{ background: 'linear-gradient(135deg,rgba(212,175,55,.15),rgba(212,175,55,.05))', padding: '20px', borderBottom: '1px solid rgba(212,175,55,.12)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '16px' }}>
+                <div style={{ width: '50px', height: '50px', borderRadius: '15px', background: 'linear-gradient(135deg,#2e271c,#1a1a18)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(212,175,55,.3)' }}>
+                  <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '26px', color: '#D4AF37', fontWeight: 600 }}>{clienteSelectee.nom[0].toUpperCase()}</span>
+                </div>
+                <div>
+                  <div style={{ fontSize: '17px', fontWeight: 700, color: '#F5F5F0' }}>{clienteSelectee.nom}</div>
+                  {clienteSelectee.telephone ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '13px', color: '#D4AF37' }}>
+                      <span className="ms" style={{ fontSize: '14px' }}>phone</span>{clienteSelectee.telephone}
+                    </div>
+                  ) : <div style={{ fontSize: '12px', color: 'rgba(245,245,240,.35)' }}>Pas de téléphone</div>}
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '8px' }}>
+                {[
+                  { label: 'Achats', value: clienteSelectee.nbVentes.toString() },
+                  { label: 'Total FCFA', value: clienteSelectee.totalDepense.toLocaleString() },
+                  { label: 'Reste', value: clienteSelectee.resteAPayer.toLocaleString(), warn: clienteSelectee.resteAPayer > 0 },
+                ].map(s => (
+                  <div key={s.label} style={{ background: 'rgba(0,0,0,.2)', borderRadius: '12px', padding: '10px', textAlign: 'center', border: `1px solid ${s.warn ? 'rgba(240,192,64,.3)' : 'rgba(255,255,255,.06)'}` }}>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: s.warn ? '#F0C040' : '#F5F5F0' }}>{s.value}</div>
+                    <div style={{ fontSize: '10px', color: 'rgba(245,245,240,.45)', fontWeight: 600, letterSpacing: '.3px', textTransform: 'uppercase' as const }}>{s.label}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{ padding: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', fontSize: '13px', fontWeight: 700, color: '#F5F5F0' }}>
+                <span className="ms" style={{ fontSize: '18px', color: '#F0C040' }}>shopping_bag</span>Historique
+              </div>
+              {chargementDetail ? (
+                <div style={{ textAlign: 'center', padding: '20px', color: 'rgba(245,245,240,.4)', fontSize: '13px' }}>Chargement...</div>
+              ) : ventesCliente.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '20px', color: 'rgba(245,245,240,.4)', fontSize: '13px' }}>Aucun achat.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '380px', overflowY: 'auto', paddingRight: '4px' }}>
+                  {ventesCliente.map(v => (
+                    <div key={v.id} style={{ padding: '12px 14px', borderRadius: '14px', background: 'rgba(255,255,255,.03)', border: '1px solid rgba(255,255,255,.06)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
+                        <div>
+                          <div style={{ fontSize: '12px', color: 'rgba(245,245,240,.4)' }}>{new Date(v.date_vente).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+                          <div style={{ fontSize: '11.5px', color: 'rgba(245,245,240,.35)' }}>par {v.utilisateurs?.nom || 'Inconnue'}</div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: '14px', fontWeight: 700, color: '#F5F5F0' }}>{v.total?.toLocaleString()} <span style={{ fontSize: '10px', color: '#D4AF37' }}>FCFA</span></div>
+                          <span style={v.statut_paiement === 'paye' ? BADGE_PAID : BADGE_PART}>{v.statut_paiement === 'paye' ? 'Payé' : `Reste : ${v.reste_a_payer?.toLocaleString()}`}</span>
+                        </div>
+                      </div>
+                      {v.vente_produits?.length > 0 && (
+                        <div style={{ borderTop: '1px solid rgba(255,255,255,.05)', paddingTop: '6px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          {v.vente_produits.map((vp: any, i: number) => (
+                            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                              <span style={{ color: 'rgba(245,245,240,.6)' }}>{vp.produits?.nom || 'Inconnu'} <span style={{ color: '#D4AF37', fontWeight: 700 }}>x{vp.quantite}</span></span>
+                              <span style={{ color: '#F5F5F0', fontWeight: 600 }}>{(vp.prix_unitaire * vp.quantite).toLocaleString()}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

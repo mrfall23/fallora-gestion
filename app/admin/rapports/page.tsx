@@ -1,7 +1,5 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { FaArrowLeft, FaFileExcel, FaDownload } from 'react-icons/fa';
 import { supabase } from '@/lib/supabase';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
@@ -9,250 +7,120 @@ import { saveAs } from 'file-saver';
 export default function AdminRapports() {
   const [ventes, setVentes] = useState<any[]>([]);
   const [chargement, setChargement] = useState(true);
-  const router = useRouter();
 
-  useEffect(() => {
-    const userData = localStorage.getItem('fallora_user');
-    if (!userData) { router.push('/'); return; }
-    chargerDonnees();
-  }, []);
+  useEffect(() => { chargerDonnees(); }, []);
 
   const chargerDonnees = async () => {
-    // 1. Ventes non annulees
-    const { data: ventesData } = await supabase
-      .from('ventes')
-      .select('*')
-      .eq('annulee', false)
-      .order('date_vente', { ascending: false });
-
-    if (!ventesData || ventesData.length === 0) {
-      setVentes([]);
-      setChargement(false);
-      return;
-    }
-
-    // 2. Clientes
+    const { data: ventesData } = await supabase.from('ventes').select('*').eq('annulee', false).order('date_vente', { ascending: false });
+    if (!ventesData || ventesData.length === 0) { setVentes([]); setChargement(false); return; }
     const clienteIds = [...new Set(ventesData.map((v: any) => v.cliente_id).filter(Boolean))];
-    const { data: clientes } = await supabase.from('clientes').select('*').in('id', clienteIds);
-
-    // 3. Vendeuses
+    const { data: clientes } = clienteIds.length > 0 ? await supabase.from('clientes').select('*').in('id', clienteIds) : { data: [] };
     const userIds = [...new Set(ventesData.map((v: any) => v.vendeuse_id).filter(Boolean))];
-    const { data: utilisateurs } = await supabase.from('utilisateurs').select('id, nom').in('id', userIds);
-
-    // 4. Vente_produits
+    const { data: utilisateurs } = userIds.length > 0 ? await supabase.from('utilisateurs').select('id, nom').in('id', userIds) : { data: [] };
     const venteIds = ventesData.map((v: any) => v.id);
     const { data: venteProduits } = await supabase.from('vente_produits').select('*').in('vente_id', venteIds);
-
-    // 5. Produits
     const produitIds = [...new Set((venteProduits || []).map((vp: any) => vp.produit_id).filter(Boolean))];
-    const { data: produits } = produitIds.length > 0
-      ? await supabase.from('produits').select('id, nom').in('id', produitIds)
-      : { data: [] };
-
-    // 6. Paiements
+    const { data: produits } = produitIds.length > 0 ? await supabase.from('produits').select('id, nom').in('id', produitIds) : { data: [] };
     const { data: paiements } = await supabase.from('paiements').select('*').in('vente_id', venteIds);
-
-    // 7. Assemblage
-    const ventesAssemblees = ventesData.map((v: any) => ({
+    setVentes(ventesData.map((v: any) => ({
       ...v,
       clientes: (clientes || []).find((c: any) => c.id === v.cliente_id) || null,
       utilisateurs: (utilisateurs || []).find((u: any) => u.id === v.vendeuse_id) || null,
-      vente_produits: (venteProduits || [])
-        .filter((vp: any) => vp.vente_id === v.id)
-        .map((vp: any) => ({
-          ...vp,
-          produits: (produits || []).find((p: any) => p.id === vp.produit_id) || null,
-        })),
+      vente_produits: (venteProduits || []).filter((vp: any) => vp.vente_id === v.id).map((vp: any) => ({ ...vp, produits: (produits || []).find((p: any) => p.id === vp.produit_id) || null })),
       paiements: (paiements || []).filter((p: any) => p.vente_id === v.id),
-    }));
-
-    setVentes(ventesAssemblees);
+    })));
     setChargement(false);
   };
 
   const exporterParVendeuse = () => {
-    const ventesParVendeuse: any = {};
+    const map: any = {};
     ventes.forEach(v => {
       const nom = v.utilisateurs?.nom || 'Inconnu';
-      if (!ventesParVendeuse[nom]) ventesParVendeuse[nom] = [];
-      ventesParVendeuse[nom].push({
-        'Date': new Date(v.date_vente).toLocaleString('fr-FR'),
-        'Cliente': v.clientes?.nom || '',
-        'Telephone': v.clientes?.telephone || '',
-        'Total (FCFA)': v.total,
-        'Montant Paye (FCFA)': v.montant_paye,
-        'Reste a Payer (FCFA)': v.reste_a_payer,
-        'Statut': v.statut_paiement === 'paye' ? 'Paye' : 'Partiel',
-      });
+      if (!map[nom]) map[nom] = [];
+      map[nom].push({ 'Date': new Date(v.date_vente).toLocaleString('fr-FR'), 'Cliente': v.clientes?.nom || '', 'Telephone': v.clientes?.telephone || '', 'Total (FCFA)': v.total, 'Montant Paye (FCFA)': v.montant_paye, 'Reste a Payer (FCFA)': v.reste_a_payer, 'Statut': v.statut_paiement === 'paye' ? 'Paye' : 'Partiel' });
     });
-
     const wb = XLSX.utils.book_new();
-    Object.entries(ventesParVendeuse).forEach(([nom, data]: any) => {
-      const ws = XLSX.utils.json_to_sheet(data);
-      XLSX.utils.book_append_sheet(wb, ws, nom.substring(0, 31));
-    });
-    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    saveAs(new Blob([buf]), 'rapport_vendeuses.xlsx');
+    Object.entries(map).forEach(([nom, data]: any) => XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), nom.substring(0, 31)));
+    saveAs(new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })]), 'rapport_vendeuses.xlsx');
   };
 
   const exporterParProduit = () => {
-    const produitsMap: any = {};
-    ventes.forEach(v => {
-      v.vente_produits?.forEach((vp: any) => {
-        const nom = vp.produits?.nom || 'Inconnu';
-        if (!produitsMap[nom]) produitsMap[nom] = { quantite: 0, total: 0 };
-        produitsMap[nom].quantite += vp.quantite;
-        produitsMap[nom].total += vp.prix_unitaire * vp.quantite;
-      });
-    });
-
-    const data = Object.entries(produitsMap).map(([nom, stats]: any) => ({
-      'Produit': nom,
-      'Quantite Vendue': stats.quantite,
-      'Total (FCFA)': stats.total,
-    })).sort((a, b) => b['Quantite Vendue'] - a['Quantite Vendue']);
-
+    const map: any = {};
+    ventes.forEach(v => v.vente_produits?.forEach((vp: any) => {
+      const nom = vp.produits?.nom || 'Inconnu';
+      if (!map[nom]) map[nom] = { quantite: 0, total: 0 };
+      map[nom].quantite += vp.quantite; map[nom].total += vp.prix_unitaire * vp.quantite;
+    }));
+    const data = Object.entries(map).map(([nom, s]: any) => ({ 'Produit': nom, 'Quantite Vendue': s.quantite, 'Total (FCFA)': s.total })).sort((a: any, b: any) => b['Quantite Vendue'] - a['Quantite Vendue']);
     const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(data);
-    XLSX.utils.book_append_sheet(wb, ws, 'Produits');
-    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    saveAs(new Blob([buf]), 'rapport_produits.xlsx');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Produits');
+    saveAs(new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })]), 'rapport_produits.xlsx');
   };
 
   const exporterParPaiement = () => {
-    const paiementsMap: any = { cash: 0, mobile_money: 0, orange_money: 0 };
-    ventes.forEach(v => {
-      v.paiements?.forEach((p: any) => {
-        if (paiementsMap[p.mode] !== undefined) {
-          paiementsMap[p.mode] += p.montant;
-        }
-      });
-    });
-
-    const total = Object.values(paiementsMap).reduce((a: any, b: any) => a + b, 0) as number;
-    const data = [
-      { 'Mode de Paiement': 'Cash', 'Total (FCFA)': paiementsMap.cash },
-      { 'Mode de Paiement': 'Mobile Money', 'Total (FCFA)': paiementsMap.mobile_money },
-      { 'Mode de Paiement': 'Orange Money', 'Total (FCFA)': paiementsMap.orange_money },
-      { 'Mode de Paiement': 'TOTAL', 'Total (FCFA)': total },
-    ];
-
+    const map: any = { cash: 0, mobile_money: 0, orange_money: 0 };
+    ventes.forEach(v => v.paiements?.forEach((p: any) => { if (map[p.mode] !== undefined) map[p.mode] += p.montant; }));
+    const total = Object.values(map).reduce((a: any, b: any) => a + b, 0) as number;
+    const data = [{ 'Mode': 'Cash', 'Total (FCFA)': map.cash }, { 'Mode': 'Mobile Money', 'Total (FCFA)': map.mobile_money }, { 'Mode': 'Orange Money', 'Total (FCFA)': map.orange_money }, { 'Mode': 'TOTAL', 'Total (FCFA)': total }];
     const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(data);
-    XLSX.utils.book_append_sheet(wb, ws, 'Paiements');
-    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    saveAs(new Blob([buf]), 'rapport_paiements.xlsx');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Paiements');
+    saveAs(new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })]), 'rapport_paiements.xlsx');
   };
 
-  const totalVentes = ventes.reduce((sum, v) => sum + v.total, 0);
-  const totalEncaisse = ventes.reduce((sum, v) => sum + v.montant_paye, 0);
-  const totalEnAttente = ventes.reduce((sum, v) => sum + v.reste_a_payer, 0);
+  const totalVentes = ventes.reduce((s, v) => s + v.total, 0);
+  const totalEncaisse = ventes.reduce((s, v) => s + v.montant_paye, 0);
+  const totalEnAttente = ventes.reduce((s, v) => s + v.reste_a_payer, 0);
+
+  const CARDS = [
+    { icon: 'groups', title: 'Rapport par vendeuse', desc: 'Ventes, transactions et détails pour chaque vendeuse sur la période.', onClick: exporterParVendeuse },
+    { icon: 'inventory_2', title: 'Rapport par produit', desc: 'Quantités vendues, chiffre d\'affaires et stock restant article par article.', onClick: exporterParProduit },
+    { icon: 'account_balance_wallet', title: 'Rapport par paiement', desc: 'Suivi des paiements complets et partiels, soldes dus et encaissements par mode.', onClick: exporterParPaiement },
+  ];
 
   return (
-    <div className="min-h-screen bg-amber-50">
-      <nav className="bg-amber-800 text-white px-6 py-4 flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <button onClick={() => router.push('/admin')} className="hover:bg-amber-700 p-2 rounded-lg">
-            <FaArrowLeft size={16} />
-          </button>
-          <FaFileExcel size={24} />
-          <h1 className="text-xl font-bold">Rapports Excel</h1>
-        </div>
-      </nav>
-
-      <div className="p-6 max-w-4xl mx-auto">
-        <div className="grid grid-cols-3 gap-4 mb-8">
-          <div className="bg-white rounded-2xl p-4 shadow border border-amber-100 text-center">
-            <p className="text-sm text-gray-500">Total ventes</p>
-            <p className="text-xl font-bold text-amber-800">{totalVentes.toLocaleString()} FCFA</p>
+    <div className="fade-up">
+      {/* Stats */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '16px', marginBottom: '28px' }}>
+        {[
+          { label: 'Total ventes', value: totalVentes.toLocaleString(), color: '#F5F5F0' },
+          { label: 'Encaissé', value: totalEncaisse.toLocaleString(), color: '#5BBF89' },
+          { label: 'En attente', value: totalEnAttente.toLocaleString(), color: '#F0C040' },
+        ].map(s => (
+          <div key={s.label} style={{ padding: '20px', borderRadius: '18px', background: 'rgba(255,255,255,.035)', border: '1px solid rgba(212,175,55,.12)', textAlign: 'center' }}>
+            <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '.5px', color: 'rgba(245,245,240,.5)', textTransform: 'uppercase', marginBottom: '8px' }}>{s.label}</div>
+            <div style={{ fontSize: '22px', fontWeight: 800, color: s.color }}>{s.value} <span style={{ fontSize: '12px', color: '#D4AF37', fontWeight: 600 }}>FCFA</span></div>
           </div>
-          <div className="bg-white rounded-2xl p-4 shadow border border-green-100 text-center">
-            <p className="text-sm text-gray-500">Encaisse</p>
-            <p className="text-xl font-bold text-green-600">{totalEncaisse.toLocaleString()} FCFA</p>
-          </div>
-          <div className="bg-white rounded-2xl p-4 shadow border border-orange-100 text-center">
-            <p className="text-sm text-gray-500">En attente</p>
-            <p className="text-xl font-bold text-orange-500">{totalEnAttente.toLocaleString()} FCFA</p>
-          </div>
-        </div>
-
-        {chargement ? (
-          <div className="text-center py-8 text-amber-600">Chargement des donnees...</div>
-        ) : ventes.length === 0 ? (
-          <div className="bg-white rounded-2xl p-8 text-center shadow">
-            <FaFileExcel size={48} className="text-amber-300 mx-auto mb-4" />
-            <p className="text-gray-500">Aucune vente a exporter pour le moment.</p>
-          </div>
-        ) : (
-          <>
-            <h2 className="text-xl font-bold text-amber-800 mb-4">
-              Exporter les rapports ({ventes.length} vente{ventes.length > 1 ? 's' : ''})
-            </h2>
-
-            <div className="space-y-4">
-              <div className="bg-white rounded-2xl shadow border border-amber-100 p-5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-green-100 p-3 rounded-xl">
-                      <FaFileExcel size={24} className="text-green-600" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-amber-800">Rapport par Vendeuse</p>
-                      <p className="text-sm text-gray-500">Ventes de chaque vendeuse avec details</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={exporterParVendeuse}
-                    className="flex items-center gap-2 bg-green-500 text-white px-4 py-2 rounded-xl hover:bg-green-600 font-semibold text-sm">
-                    <FaDownload size={14} />
-                    Telecharger
-                  </button>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-2xl shadow border border-amber-100 p-5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-blue-100 p-3 rounded-xl">
-                      <FaFileExcel size={24} className="text-blue-600" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-amber-800">Rapport par Produit</p>
-                      <p className="text-sm text-gray-500">Quantites vendues et total par produit</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={exporterParProduit}
-                    className="flex items-center gap-2 bg-blue-500 text-white px-4 py-2 rounded-xl hover:bg-blue-600 font-semibold text-sm">
-                    <FaDownload size={14} />
-                    Telecharger
-                  </button>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-2xl shadow border border-amber-100 p-5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-amber-100 p-3 rounded-xl">
-                      <FaFileExcel size={24} className="text-amber-600" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-amber-800">Rapport par Paiement</p>
-                      <p className="text-sm text-gray-500">Total encaisse par mode de paiement</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={exporterParPaiement}
-                    className="flex items-center gap-2 bg-amber-500 text-white px-4 py-2 rounded-xl hover:bg-amber-600 font-semibold text-sm">
-                    <FaDownload size={14} />
-                    Telecharger
-                  </button>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
+        ))}
       </div>
+
+      {chargement ? (
+        <div style={{ textAlign: 'center', padding: '40px', color: 'rgba(245,245,240,.4)' }}>Chargement...</div>
+      ) : ventes.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '80px', color: 'rgba(245,245,240,.4)' }}>
+          <span className="ms" style={{ fontSize: '48px', display: 'block', marginBottom: '12px', color: 'rgba(212,175,55,.3)' }}>download</span>
+          Aucune vente à exporter.
+        </div>
+      ) : (
+        <>
+          <div style={{ fontSize: '14px', color: 'rgba(245,245,240,.5)', marginBottom: '16px', fontWeight: 500 }}>
+            {ventes.length} vente{ventes.length > 1 ? 's' : ''} disponibles à l'export
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: '20px' }}>
+            {CARDS.map(r => (
+              <div key={r.title} style={{ display: 'flex', flexDirection: 'column', padding: '28px', borderRadius: '22px', background: 'rgba(255,255,255,.035)', border: '1px solid rgba(212,175,55,.12)', backdropFilter: 'blur(20px)', boxShadow: '0 8px 30px rgba(0,0,0,.25)' }}>
+                <div style={{ width: '54px', height: '54px', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg,rgba(45,150,90,.18),rgba(45,150,90,.05))', border: '1px solid rgba(45,150,90,.3)', marginBottom: '20px' }}>
+                  <span className="ms" style={{ fontSize: '27px', color: '#5BBF89' }}>{r.icon}</span>
+                </div>
+                <div style={{ fontSize: '18px', fontWeight: 700, color: '#F5F5F0', marginBottom: '7px' }}>{r.title}</div>
+                <div style={{ fontSize: '13.5px', lineHeight: 1.55, color: 'rgba(245,245,240,.5)', marginBottom: '24px', flex: 1 }}>{r.desc}</div>
+                <button onClick={r.onClick} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '9px', height: '48px', border: 'none', borderRadius: '14px', cursor: 'pointer', background: 'linear-gradient(135deg,#F0C040,#D4AF37)', color: '#0A0A0A', fontSize: '14.5px', fontWeight: 700, boxShadow: '0 10px 24px rgba(212,175,55,.22)' }}>
+                  <span className="ms" style={{ fontSize: '20px' }}>download</span>Télécharger Excel
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

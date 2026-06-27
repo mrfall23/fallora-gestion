@@ -1,321 +1,143 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { FaArrowLeft, FaPlus, FaEdit, FaTrash, FaBox } from 'react-icons/fa';
-import { MdInventory } from 'react-icons/md';
 import { supabase } from '@/lib/supabase';
 
-type Produit = {
-  id: number;
-  nom: string;
-  prix: number;
-  stock_initial: number;
-  stock_restant: number;
-  image?: string;
-};
+type Produit = { id: number; nom: string; prix: number; description: string; stock_restant: number; stock_initial: number; image: string | null };
+const FORM_VIDE: Omit<Produit, 'id'> = { nom: '', prix: 0, description: '', stock_restant: 0, stock_initial: 0, image: null };
 
-const FORM_VIDE = { nom: '', prix: '', stock_initial: '', image: '' };
+const inputStyle: React.CSSProperties = { height: '44px', padding: '0 14px', borderRadius: '12px', background: 'rgba(0,0,0,.35)', border: '1px solid rgba(255,255,255,.1)', outline: 'none', color: '#F5F5F0', fontSize: '14px', width: '100%' };
 
 export default function AdminProduits() {
   const [produits, setProduits] = useState<Produit[]>([]);
   const [chargement, setChargement] = useState(true);
-  const [afficherFormulaire, setAfficherFormulaire] = useState(false);
-  const [produitEnEdition, setProduitEnEdition] = useState<Produit | null>(null);
+  const [formOuvert, setFormOuvert] = useState(false);
+  const [produitEdite, setProduitEdite] = useState<Produit | null>(null);
   const [form, setForm] = useState(FORM_VIDE);
-  const [erreur, setErreur] = useState('');
-  const [succes, setSucces] = useState('');
-  const [enregistrement, setEnregistrement] = useState(false);
-  const router = useRouter();
+  const [sauvegarde, setSauvegarde] = useState(false);
 
-  useEffect(() => {
-    const userData = localStorage.getItem('fallora_user');
-    if (!userData) { router.push('/'); return; }
-    const parsed = JSON.parse(userData);
-    if (parsed.role !== 'admin') { router.push('/'); return; }
-    chargerProduits();
-  }, []);
+  useEffect(() => { chargerProduits(); }, []);
 
   const chargerProduits = async () => {
-    const { data } = await supabase
-      .from('produits')
-      .select('*')
-      .order('nom');
+    const { data } = await supabase.from('produits').select('*').order('nom');
     setProduits(data || []);
     setChargement(false);
   };
 
-  const ouvrirAjout = () => {
-    setProduitEnEdition(null);
-    setForm(FORM_VIDE);
-    setErreur('');
-    setAfficherFormulaire(true);
-  };
+  const ouvrirAjout = () => { setForm(FORM_VIDE); setProduitEdite(null); setFormOuvert(true); };
+  const ouvrirEdit = (p: Produit) => { setForm({ nom: p.nom, prix: p.prix, description: p.description || '', stock_restant: p.stock_restant, stock_initial: p.stock_initial, image: p.image }); setProduitEdite(p); setFormOuvert(true); };
+  const fermerForm = () => { setFormOuvert(false); setProduitEdite(null); };
 
-  const ouvrirEdition = (produit: Produit) => {
-    setProduitEnEdition(produit);
-    setForm({
-      nom: produit.nom,
-      prix: String(produit.prix),
-      stock_initial: String(produit.stock_initial),
-      image: produit.image || '',
-    });
-    setErreur('');
-    setAfficherFormulaire(true);
-  };
-
-  const fermerFormulaire = () => {
-    setAfficherFormulaire(false);
-    setProduitEnEdition(null);
-    setForm(FORM_VIDE);
-    setErreur('');
-  };
-
-  const enregistrer = async () => {
-    if (!form.nom.trim()) { setErreur('Le nom est obligatoire.'); return; }
-    if (!form.prix || Number(form.prix) <= 0) { setErreur('Le prix doit etre superieur a 0.'); return; }
-    if (!form.stock_initial || Number(form.stock_initial) < 0) { setErreur('Le stock doit etre un nombre positif.'); return; }
-
-    setEnregistrement(true);
-    setErreur('');
-
-    try {
-      if (produitEnEdition) {
-        const difference = Number(form.stock_initial) - produitEnEdition.stock_initial;
-        const nouveauStock = Math.max(0, produitEnEdition.stock_restant + difference);
-
-        const { error } = await supabase
-          .from('produits')
-          .update({
-            nom: form.nom.trim(),
-            prix: Number(form.prix),
-            stock_initial: Number(form.stock_initial),
-            stock_restant: nouveauStock,
-            image: form.image.trim() || null,
-          })
-          .eq('id', produitEnEdition.id);
-
-        if (error) throw error;
-        setSucces('Produit modifie avec succes.');
-      } else {
-        const { error } = await supabase
-          .from('produits')
-          .insert({
-            nom: form.nom.trim(),
-            prix: Number(form.prix),
-            stock_initial: Number(form.stock_initial),
-            stock_restant: Number(form.stock_initial),
-            image: form.image.trim() || null,
-          });
-
-        if (error) throw error;
-        setSucces('Produit ajoute avec succes.');
-      }
-
-      fermerFormulaire();
-      chargerProduits();
-      setTimeout(() => setSucces(''), 3000);
-    } catch {
-      setErreur('Erreur lors de l\'enregistrement. Veuillez reessayer.');
-    } finally {
-      setEnregistrement(false);
-    }
-  };
-
-  const supprimerProduit = async (produit: Produit) => {
-    if (!confirm(`Supprimer le produit "${produit.nom}" ?`)) return;
-    const { error } = await supabase.from('produits').delete().eq('id', produit.id);
-    if (error) {
-      setErreur('Impossible de supprimer ce produit (il est peut-etre lie a des ventes).');
-      setTimeout(() => setErreur(''), 4000);
+  const sauvegarder = async () => {
+    if (!form.nom.trim() || form.prix <= 0) return;
+    setSauvegarde(true);
+    if (produitEdite) {
+      const diff = form.stock_restant - produitEdite.stock_restant;
+      await supabase.from('produits').update({ nom: form.nom.trim(), prix: form.prix, description: form.description, stock_restant: form.stock_restant, stock_initial: produitEdite.stock_initial + diff, image: form.image }).eq('id', produitEdite.id);
     } else {
-      chargerProduits();
+      await supabase.from('produits').insert({ nom: form.nom.trim(), prix: form.prix, description: form.description, stock_restant: form.stock_restant, stock_initial: form.stock_restant, image: form.image });
     }
+    await chargerProduits();
+    setSauvegarde(false);
+    fermerForm();
   };
 
-  const stockTotal = produits.reduce((sum, p) => sum + p.stock_restant, 0);
-  const produitRupture = produits.filter(p => p.stock_restant === 0).length;
+  const supprimer = async (id: number) => {
+    if (!confirm('Supprimer ce produit ?')) return;
+    await supabase.from('produits').delete().eq('id', id);
+    await chargerProduits();
+  };
+
+  const stockBadge = (p: Produit) => {
+    if (p.stock_restant === 0) return { text: 'Épuisé', style: { fontSize: '12px', fontWeight: 700, color: '#E37777', background: 'rgba(227,119,119,.12)', border: '1px solid rgba(227,119,119,.25)', padding: '5px 12px', borderRadius: '20px' } };
+    if (p.stock_restant <= 5) return { text: `${p.stock_restant} en stock`, style: { fontSize: '12px', fontWeight: 700, color: '#F0C040', background: 'rgba(240,192,64,.12)', border: '1px solid rgba(240,192,64,.25)', padding: '5px 12px', borderRadius: '20px' } };
+    return { text: `${p.stock_restant} en stock`, style: { fontSize: '12px', fontWeight: 700, color: 'rgba(245,245,240,.7)', background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.1)', padding: '5px 12px', borderRadius: '20px' } };
+  };
+
+  if (chargement) return <div style={{ textAlign: 'center', padding: '60px', color: 'rgba(245,245,240,.4)' }}>Chargement...</div>;
 
   return (
-    <div className="min-h-screen bg-amber-50">
-      <nav className="bg-amber-800 text-white px-6 py-4 flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <button onClick={() => router.push('/admin')} className="hover:bg-amber-700 p-2 rounded-lg">
-            <FaArrowLeft size={16} />
-          </button>
-          <FaBox size={22} />
-          <h1 className="text-xl font-bold">Gestion des Produits</h1>
-        </div>
-        <button
-          onClick={ouvrirAjout}
-          className="flex items-center gap-2 bg-white text-amber-800 px-4 py-2 rounded-xl font-bold text-sm hover:bg-amber-100 transition">
-          <FaPlus size={14} />
-          Ajouter un produit
+    <div className="fade-up">
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '20px' }}>
+        <button onClick={ouvrirAjout} style={{ display: 'flex', alignItems: 'center', gap: '9px', height: '46px', padding: '0 22px', border: 'none', borderRadius: '14px', cursor: 'pointer', background: 'linear-gradient(135deg,#F0C040,#D4AF37)', color: '#0A0A0A', fontSize: '14.5px', fontWeight: 700, boxShadow: '0 10px 26px rgba(212,175,55,.25)' }}>
+          <span className="ms" style={{ fontSize: '20px' }}>add</span>Ajouter un produit
         </button>
-      </nav>
+      </div>
 
-      <div className="p-6 max-w-4xl mx-auto">
-        {succes && (
-          <div className="bg-green-50 border border-green-200 text-green-700 rounded-xl p-3 mb-4 text-sm text-center font-semibold">
-            {succes}
+      {/* Formulaire */}
+      {formOuvert && (
+        <div style={{ marginBottom: '20px', padding: '24px', borderRadius: '20px', background: 'rgba(255,255,255,.04)', border: '1px solid rgba(212,175,55,.2)', backdropFilter: 'blur(20px)' }}>
+          <div style={{ fontSize: '16px', fontWeight: 700, color: '#F5F5F0', marginBottom: '18px' }}>{produitEdite ? 'Modifier le produit' : 'Nouveau produit'}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+            <div>
+              <div style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(245,245,240,.45)', letterSpacing: '.5px', marginBottom: '6px' }}>NOM DU PRODUIT *</div>
+              <input style={inputStyle} value={form.nom} onChange={e => setForm({ ...form, nom: e.target.value })} placeholder="Ex : Sac à main cuir" />
+            </div>
+            <div>
+              <div style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(245,245,240,.45)', letterSpacing: '.5px', marginBottom: '6px' }}>PRIX (FCFA) *</div>
+              <input style={inputStyle} type="number" value={form.prix || ''} onChange={e => setForm({ ...form, prix: Number(e.target.value) })} placeholder="0" />
+            </div>
+            <div>
+              <div style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(245,245,240,.45)', letterSpacing: '.5px', marginBottom: '6px' }}>STOCK *</div>
+              <input style={inputStyle} type="number" value={form.stock_restant || ''} onChange={e => setForm({ ...form, stock_restant: Number(e.target.value) })} placeholder="0" />
+            </div>
+            <div>
+              <div style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(245,245,240,.45)', letterSpacing: '.5px', marginBottom: '6px' }}>URL IMAGE (optionnel)</div>
+              <input style={inputStyle} value={form.image || ''} onChange={e => setForm({ ...form, image: e.target.value || null })} placeholder="https://..." />
+            </div>
           </div>
-        )}
-        {erreur && !afficherFormulaire && (
-          <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 mb-4 text-sm text-center">
-            {erreur}
+          <div style={{ marginBottom: '18px' }}>
+            <div style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(245,245,240,.45)', letterSpacing: '.5px', marginBottom: '6px' }}>DESCRIPTION</div>
+            <textarea style={{ ...inputStyle, height: '72px', resize: 'vertical', paddingTop: '12px' } as any} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Description optionnelle..." />
           </div>
-        )}
-
-        <div className="grid grid-cols-3 gap-4 mb-6">
-          <div className="bg-white rounded-2xl p-4 shadow border border-amber-100 text-center">
-            <p className="text-sm text-gray-500">Total produits</p>
-            <p className="text-2xl font-bold text-amber-800">{produits.length}</p>
-          </div>
-          <div className="bg-white rounded-2xl p-4 shadow border border-amber-100 text-center">
-            <MdInventory size={20} className="text-amber-600 mx-auto mb-1" />
-            <p className="text-sm text-gray-500">Stock total</p>
-            <p className="text-2xl font-bold text-amber-800">{stockTotal}</p>
-          </div>
-          <div className="bg-white rounded-2xl p-4 shadow border border-red-100 text-center">
-            <p className="text-sm text-gray-500">Ruptures de stock</p>
-            <p className="text-2xl font-bold text-red-500">{produitRupture}</p>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button onClick={sauvegarder} disabled={sauvegarde} style={{ flex: 1, height: '46px', border: 'none', borderRadius: '13px', cursor: 'pointer', background: 'linear-gradient(135deg,#F0C040,#D4AF37)', color: '#0A0A0A', fontWeight: 700, fontSize: '14px' }}>
+              {sauvegarde ? 'Sauvegarde...' : produitEdite ? 'Enregistrer les modifications' : 'Créer le produit'}
+            </button>
+            <button onClick={fermerForm} style={{ height: '46px', padding: '0 20px', border: '1px solid rgba(255,255,255,.1)', borderRadius: '13px', cursor: 'pointer', background: 'transparent', color: 'rgba(245,245,240,.6)', fontSize: '14px' }}>Annuler</button>
           </div>
         </div>
+      )}
 
-        {/* FORMULAIRE */}
-        {afficherFormulaire && (
-          <div className="bg-white rounded-2xl shadow border border-amber-100 p-6 mb-6">
-            <h2 className="font-bold text-amber-800 text-lg mb-4">
-              {produitEnEdition ? 'Modifier le produit' : 'Ajouter un produit'}
-            </h2>
-
-            {erreur && (
-              <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 mb-4 text-sm">
-                {erreur}
+      {/* Liste */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        {produits.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '60px', color: 'rgba(245,245,240,.4)' }}>
+            <span className="ms" style={{ fontSize: '48px', display: 'block', marginBottom: '12px', color: 'rgba(212,175,55,.3)' }}>inventory_2</span>
+            Aucun produit. Commencez par en ajouter un.
+          </div>
+        ) : produits.map(p => {
+          const badge = stockBadge(p);
+          return (
+            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '20px', padding: '16px 20px', borderRadius: '18px', background: 'rgba(255,255,255,.035)', border: '1px solid rgba(255,255,255,.06)', backdropFilter: 'blur(20px)' }}>
+              {p.image ? (
+                <img src={p.image} alt={p.nom} style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '14px', flexShrink: 0 }} />
+              ) : (
+                <div style={{ width: '60px', height: '60px', borderRadius: '14px', flexShrink: 0, background: '#1a1a18', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255,255,255,.07)' }}>
+                  <span className="ms" style={{ fontSize: '26px', color: 'rgba(212,175,55,.4)' }}>image</span>
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: '15.5px', fontWeight: 600, color: '#F5F5F0' }}>{p.nom}</div>
+                {p.description && <div style={{ fontSize: '12.5px', color: 'rgba(245,245,240,.42)', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.description}</div>}
               </div>
-            )}
-
-            <div className="space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Nom du produit *</label>
-                <input
-                  value={form.nom}
-                  onChange={e => setForm({ ...form, nom: e.target.value })}
-                  placeholder="Ex: Robe florale"
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-400"
-                />
+              <div style={{ textAlign: 'right', minWidth: '120px' }}>
+                <span style={{ fontSize: '17px', fontWeight: 800, color: '#F5F5F0' }}>{p.prix?.toLocaleString()}</span>
+                <span style={{ fontSize: '12px', color: '#D4AF37', fontWeight: 600, marginLeft: '4px' }}>FCFA</span>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Prix (FCFA) *</label>
-                <input
-                  type="number"
-                  value={form.prix}
-                  onChange={e => setForm({ ...form, prix: e.target.value })}
-                  placeholder="Ex: 15000"
-                  min="0"
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-400"
-                />
+              <div style={{ minWidth: '110px', display: 'flex', justifyContent: 'center' }}>
+                <span style={badge.style as any}>{badge.text}</span>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Stock {produitEnEdition ? '(modifier ajuste automatiquement le stock restant)' : 'initial *'}
-                </label>
-                <input
-                  type="number"
-                  value={form.stock_initial}
-                  onChange={e => setForm({ ...form, stock_initial: e.target.value })}
-                  placeholder="Ex: 20"
-                  min="0"
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-400"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">URL de l'image (optionnel)</label>
-                <input
-                  value={form.image}
-                  onChange={e => setForm({ ...form, image: e.target.value })}
-                  placeholder="https://..."
-                  className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-400"
-                />
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button onClick={() => ouvrirEdit(p)} style={{ display: 'flex', alignItems: 'center', gap: '7px', height: '40px', padding: '0 16px', borderRadius: '12px', cursor: 'pointer', background: 'rgba(212,175,55,.1)', border: '1px solid rgba(212,175,55,.25)', color: '#F0C040', fontSize: '13.5px', fontWeight: 600 }}>
+                  <span className="ms" style={{ fontSize: '18px' }}>edit</span>Modifier
+                </button>
+                <button onClick={() => supprimer(p.id)} style={{ width: '40px', height: '40px', borderRadius: '12px', cursor: 'pointer', background: 'rgba(227,119,119,.1)', border: '1px solid rgba(227,119,119,.25)', color: '#E37777', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <span className="ms" style={{ fontSize: '18px' }}>delete</span>
+                </button>
               </div>
             </div>
-
-            <div className="flex gap-3 mt-5">
-              <button
-                onClick={fermerFormulaire}
-                className="flex-1 border border-gray-200 text-gray-600 py-2.5 rounded-xl text-sm font-semibold hover:bg-gray-50">
-                Annuler
-              </button>
-              <button
-                onClick={enregistrer}
-                disabled={enregistrement}
-                className="flex-1 bg-amber-700 text-white py-2.5 rounded-xl text-sm font-bold hover:bg-amber-800 disabled:opacity-50">
-                {enregistrement ? 'Enregistrement...' : produitEnEdition ? 'Modifier' : 'Ajouter'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* LISTE */}
-        {chargement ? (
-          <div className="text-center py-12 text-amber-600">Chargement...</div>
-        ) : produits.length === 0 ? (
-          <div className="bg-white rounded-2xl p-8 text-center shadow">
-            <FaBox size={48} className="text-amber-300 mx-auto mb-4" />
-            <p className="text-gray-500 mb-4">Aucun produit pour le moment.</p>
-            <button onClick={ouvrirAjout} className="bg-amber-700 text-white px-6 py-2 rounded-xl text-sm font-bold hover:bg-amber-800">
-              Ajouter le premier produit
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {produits.map(produit => (
-              <div key={produit.id}
-                className={`bg-white rounded-2xl shadow border flex items-center gap-4 p-4 ${
-                  produit.stock_restant === 0 ? 'border-red-100' : 'border-amber-100'
-                }`}>
-                {produit.image ? (
-                  <img src={produit.image} alt={produit.nom}
-                    className="w-16 h-16 object-contain rounded-xl bg-amber-50 shrink-0" />
-                ) : (
-                  <div className="w-16 h-16 bg-amber-50 rounded-xl flex items-center justify-center shrink-0">
-                    <FaBox size={24} className="text-amber-300" />
-                  </div>
-                )}
-
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-amber-800 truncate">{produit.nom}</p>
-                  <p className="text-sm text-amber-600 font-semibold">{produit.prix.toLocaleString()} FCFA</p>
-                  <div className="flex items-center gap-3 mt-1">
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                      produit.stock_restant === 0
-                        ? 'bg-red-100 text-red-600'
-                        : produit.stock_restant <= 3
-                        ? 'bg-orange-100 text-orange-600'
-                        : 'bg-green-100 text-green-700'
-                    }`}>
-                      {produit.stock_restant === 0
-                        ? 'Rupture'
-                        : `Stock: ${produit.stock_restant} / ${produit.stock_initial}`}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    onClick={() => ouvrirEdition(produit)}
-                    className="bg-amber-50 text-amber-700 p-2.5 rounded-xl hover:bg-amber-100 border border-amber-200">
-                    <FaEdit size={14} />
-                  </button>
-                  <button
-                    onClick={() => supprimerProduit(produit)}
-                    className="bg-red-50 text-red-500 p-2.5 rounded-xl hover:bg-red-100 border border-red-100">
-                    <FaTrash size={14} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+          );
+        })}
       </div>
     </div>
   );

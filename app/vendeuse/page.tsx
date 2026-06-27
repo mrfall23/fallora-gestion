@@ -1,9 +1,9 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { FaShoppingCart, FaSignOutAlt, FaPlus, FaMinus, FaTrash } from 'react-icons/fa';
-import { MdAttachMoney, MdPerson } from 'react-icons/md';
 import { supabase } from '@/lib/supabase';
+
+const inputStyle: React.CSSProperties = { height: '44px', padding: '0 14px', borderRadius: '12px', background: 'rgba(0,0,0,.3)', border: '1px solid rgba(255,255,255,.08)', outline: 'none', color: '#F5F5F0', fontSize: '14px', width: '100%' };
 
 export default function VendeusePage() {
   const [user, setUser] = useState<any>(null);
@@ -12,6 +12,7 @@ export default function VendeusePage() {
   const [cliente, setCliente] = useState({ nom: '', telephone: '' });
   const [modePaiement, setModePaiement] = useState('cash');
   const [montantPaye, setMontantPaye] = useState<number | ''>('');
+  const [statutPaiement, setStatutPaiement] = useState<'paye' | 'partiel'>('paye');
   const [chargement, setChargement] = useState(true);
   const [enregistrement, setEnregistrement] = useState(false);
   const [succes, setSucces] = useState('');
@@ -21,401 +22,255 @@ export default function VendeusePage() {
   useEffect(() => {
     const userData = localStorage.getItem('fallora_user');
     if (!userData) { router.push('/'); return; }
-    const parsed = JSON.parse(userData);
-    setUser(parsed);
+    setUser(JSON.parse(userData));
     chargerProduits();
   }, []);
 
   const chargerProduits = async () => {
-    const { data } = await supabase
-      .from('produits')
-      .select('*')
-      .order('nom');
+    const { data } = await supabase.from('produits').select('*').order('nom');
     setProduits(data || []);
     setChargement(false);
   };
 
   const ajouterAuPanier = (produit: any) => {
-    const produitReel = produits.find(p => p.id === produit.id);
-    if (!produitReel) return;
+    const reel = produits.find(p => p.id === produit.id);
+    if (!reel) return;
     const existant = panier.find(p => p.id === produit.id);
-    const quantiteActuelle = existant ? existant.quantite : 0;
-    if (quantiteActuelle >= produitReel.stock_restant) return;
-    if (existant) {
-      setPanier(panier.map(p =>
-        p.id === produit.id ? { ...p, quantite: p.quantite + 1 } : p
-      ));
-    } else {
-      setPanier([...panier, { ...produitReel, quantite: 1 }]);
-    }
+    const qteActuelle = existant?.quantite ?? 0;
+    if (qteActuelle >= reel.stock_restant) return;
+    if (existant) setPanier(panier.map(p => p.id === produit.id ? { ...p, quantite: p.quantite + 1 } : p));
+    else setPanier([...panier, { ...reel, quantite: 1 }]);
   };
 
   const retirerDuPanier = (id: number) => {
-    const existant = panier.find(p => p.id === id);
-    if (!existant) return;
-    if (existant.quantite === 1) {
-      setPanier(panier.filter(p => p.id !== id));
-    } else {
-      setPanier(panier.map(p =>
-        p.id === id ? { ...p, quantite: p.quantite - 1 } : p
-      ));
-    }
+    const ex = panier.find(p => p.id === id);
+    if (!ex) return;
+    if (ex.quantite === 1) setPanier(panier.filter(p => p.id !== id));
+    else setPanier(panier.map(p => p.id === id ? { ...p, quantite: p.quantite - 1 } : p));
   };
 
-  const supprimerDuPanier = (id: number) => {
-    setPanier(panier.filter(p => p.id !== id));
-  };
+  const supprimerDuPanier = (id: number) => setPanier(panier.filter(p => p.id !== id));
 
-  const total = panier.reduce((sum, p) => sum + p.prix * p.quantite, 0);
+  const total = panier.reduce((s, p) => s + p.prix * p.quantite, 0);
   const montantPayeNum = Number(montantPaye) || 0;
-  const resteAPayer = Math.max(0, total - montantPayeNum);
-  const nbArticles = panier.reduce((sum, p) => sum + p.quantite, 0);
+  const montantEffectif = statutPaiement === 'paye' ? total : montantPayeNum;
+  const resteAPayer = Math.max(0, total - montantEffectif);
+  const nbArticles = panier.reduce((s, p) => s + p.quantite, 0);
 
   const enregistrerVente = async () => {
     if (panier.length === 0) { setErreur('Ajoutez des produits au panier.'); return; }
     if (!cliente.nom.trim()) { setErreur('Entrez le nom de la cliente.'); return; }
-    if (!montantPaye || montantPayeNum <= 0) { setErreur('Entrez le montant paye.'); return; }
-
-    setErreur('');
-    setEnregistrement(true);
-
+    if (statutPaiement === 'partiel' && (!montantPaye || montantPayeNum <= 0)) { setErreur('Entrez le montant payé.'); return; }
+    setErreur(''); setEnregistrement(true);
     try {
-      // 1. Creer ou retrouver la cliente
       let clienteId: number;
-
       if (cliente.telephone.trim()) {
-        const { data: clienteExistante } = await supabase
-          .from('clientes')
-          .select('id')
-          .eq('telephone', cliente.telephone.trim())
-          .maybeSingle();
-
-        if (clienteExistante) {
-          clienteId = clienteExistante.id;
-        } else {
-          const { data: nouvelleCliente, error: erreurCliente } = await supabase
-            .from('clientes')
-            .insert({ nom: cliente.nom.trim(), telephone: cliente.telephone.trim() })
-            .select()
-            .single();
-          if (erreurCliente || !nouvelleCliente) {
-            setErreur('Erreur lors de la creation de la cliente.');
-            setEnregistrement(false);
-            return;
-          }
-          clienteId = nouvelleCliente.id;
+        const { data: ex } = await supabase.from('clientes').select('id').eq('telephone', cliente.telephone.trim()).maybeSingle();
+        if (ex) { clienteId = ex.id; }
+        else {
+          const { data: nv, error: e } = await supabase.from('clientes').insert({ nom: cliente.nom.trim(), telephone: cliente.telephone.trim() }).select().single();
+          if (e || !nv) { setErreur('Erreur création cliente.'); return; }
+          clienteId = nv.id;
         }
       } else {
-        // Pas de telephone : creer une nouvelle cliente directement
-        const { data: nouvelleCliente, error: erreurCliente } = await supabase
-          .from('clientes')
-          .insert({ nom: cliente.nom.trim(), telephone: null })
-          .select()
-          .single();
-        if (erreurCliente || !nouvelleCliente) {
-          setErreur('Erreur lors de la creation de la cliente.');
-          setEnregistrement(false);
-          return;
-        }
-        clienteId = nouvelleCliente.id;
+        const { data: nv, error: e } = await supabase.from('clientes').insert({ nom: cliente.nom.trim(), telephone: null }).select().single();
+        if (e || !nv) { setErreur('Erreur création cliente.'); return; }
+        clienteId = nv.id;
       }
-
-      // 2. Creer la vente
-      const statut = resteAPayer === 0 ? 'paye' : 'partiel';
-      const { data: vente, error: erreurVente } = await supabase
-        .from('ventes')
-        .insert({
-          vendeuse_id: user.id,
-          cliente_id: clienteId,
-          total,
-          montant_paye: montantPayeNum,
-          reste_a_payer: resteAPayer,
-          statut_paiement: statut,
-          annulee: false,
-        })
-        .select()
-        .single();
-
-      if (erreurVente || !vente) {
-        setErreur('Erreur lors de la creation de la vente. Veuillez reessayer.');
-        setEnregistrement(false);
-        return;
-      }
-
-      // 3. Ajouter les produits de la vente
-      const { error: erreurProduits } = await supabase.from('vente_produits').insert(
-        panier.map(p => ({
-          vente_id: vente.id,
-          produit_id: p.id,
-          quantite: p.quantite,
-          prix_unitaire: p.prix,
-        }))
-      );
-
-      if (erreurProduits) {
-        setErreur('Erreur lors de l\'enregistrement des produits.');
-        setEnregistrement(false);
-        return;
-      }
-
-      // 4. Enregistrer le paiement
-      await supabase.from('paiements').insert({
-        vente_id: vente.id,
-        montant: montantPayeNum,
-        mode: modePaiement,
-      });
-
-      // 5. Mettre a jour le stock de chaque produit
+      const montantFinal = statutPaiement === 'paye' ? total : montantPayeNum;
+      const { data: vente, error: ev } = await supabase.from('ventes').insert({ vendeuse_id: user.id, cliente_id: clienteId, total, montant_paye: montantFinal, reste_a_payer: Math.max(0, total - montantFinal), statut_paiement: statutPaiement, annulee: false }).select().single();
+      if (ev || !vente) { setErreur('Erreur création vente.'); return; }
+      const { error: ep } = await supabase.from('vente_produits').insert(panier.map(p => ({ vente_id: vente.id, produit_id: p.id, quantite: p.quantite, prix_unitaire: p.prix })));
+      if (ep) { setErreur('Erreur enregistrement produits.'); return; }
+      await supabase.from('paiements').insert({ vente_id: vente.id, montant: montantFinal, mode: modePaiement });
       for (const p of panier) {
-        const produitActuel = produits.find(pr => pr.id === p.id);
-        if (produitActuel) {
-          await supabase
-            .from('produits')
-            .update({ stock_restant: Math.max(0, produitActuel.stock_restant - p.quantite) })
-            .eq('id', p.id);
-        }
+        const reel = produits.find(pr => pr.id === p.id);
+        if (reel) await supabase.from('produits').update({ stock_restant: Math.max(0, reel.stock_restant - p.quantite) }).eq('id', p.id);
       }
-
-      // 6. Reinitialiser
-      setSucces('Vente enregistree avec succes !');
-      setPanier([]);
-      setCliente({ nom: '', telephone: '' });
-      setMontantPaye('');
-      setModePaiement('cash');
+      setSucces('Vente enregistrée avec succès !');
+      setPanier([]); setCliente({ nom: '', telephone: '' }); setMontantPaye(''); setStatutPaiement('paye'); setModePaiement('cash');
       await chargerProduits();
       setTimeout(() => setSucces(''), 4000);
-    } catch {
-      setErreur('Erreur inattendue. Veuillez reessayer.');
-    } finally {
-      setEnregistrement(false);
-    }
+    } catch { setErreur('Erreur inattendue. Veuillez réessayer.'); }
+    finally { setEnregistrement(false); }
   };
 
-  if (chargement) return (
-    <div className="min-h-screen bg-amber-50 flex items-center justify-center text-amber-600 font-semibold">
-      Chargement des produits...
-    </div>
-  );
-
   return (
-    <div className="min-h-screen bg-amber-50">
-      <nav className="bg-amber-800 text-white px-4 py-3 flex justify-between items-center">
-        <div className="flex items-center gap-2">
-          <FaShoppingCart size={20} />
-          <h1 className="text-lg font-bold">Fallora Ventes</h1>
+    <div style={{ minHeight: '100vh', background: '#0A0A0A' }}>
+      {/* Header */}
+      <header style={{ position: 'sticky', top: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 32px', background: 'rgba(10,10,10,.85)', backdropFilter: 'blur(16px)', borderBottom: '1px solid rgba(212,175,55,.12)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ width: '36px', height: '36px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg,#F0C040,#D4AF37)' }}>
+            <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '22px', fontWeight: 700, color: '#0A0A0A' }}>F</span>
+          </div>
+          <div>
+            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '20px', fontWeight: 600, background: 'linear-gradient(135deg,#F5E7B0,#D4AF37)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>Fallora</div>
+            <div style={{ fontSize: '11px', color: 'rgba(245,245,240,.4)', letterSpacing: '1px', textTransform: 'uppercase' }}>Espace vendeuse</div>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="text-amber-200 text-sm">{user?.nom}</span>
-          <button
-            onClick={() => {
-              localStorage.removeItem('fallora_user');
-              document.cookie = 'fallora_role=; path=/; max-age=0';
-              router.push('/');
-            }}
-            className="bg-amber-900 p-2 rounded-lg hover:bg-amber-700">
-            <FaSignOutAlt size={14} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          {user && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 14px', borderRadius: '12px', background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.07)' }}>
+              <div style={{ width: '28px', height: '28px', borderRadius: '8px', background: 'linear-gradient(135deg,#2a2a28,#1a1a18)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(212,175,55,.2)' }}>
+                <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '14px', color: '#D4AF37', fontWeight: 600 }}>{user.nom?.[0]?.toUpperCase()}</span>
+              </div>
+              <span style={{ fontSize: '13.5px', fontWeight: 600, color: '#F5F5F0' }}>{user.nom}</span>
+            </div>
+          )}
+          <button onClick={() => { localStorage.removeItem('fallora_user'); document.cookie = 'fallora_role=; path=/; max-age=0'; router.push('/'); }} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,.1)', borderRadius: '10px', padding: '8px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', color: 'rgba(245,245,240,.6)', fontSize: '13px' }}>
+            <span className="ms" style={{ fontSize: '18px' }}>logout</span>
           </button>
         </div>
-      </nav>
+      </header>
 
-      <div className="p-4 max-w-2xl mx-auto">
+      {chargement ? (
+        <div style={{ textAlign: 'center', padding: '80px', color: 'rgba(245,245,240,.4)' }}>Chargement des produits...</div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: '24px', padding: '28px 32px', maxWidth: '1400px', margin: '0 auto' }}>
 
-        {succes && (
-          <div className="bg-green-50 border border-green-200 text-green-700 rounded-xl p-3 mb-4 text-sm text-center font-semibold">
-            {succes}
-          </div>
-        )}
-        {erreur && (
-          <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 mb-4 text-sm text-center">
-            {erreur}
-          </div>
-        )}
-
-        {/* PANIER */}
-        {panier.length > 0 && (
-          <div className="bg-white rounded-2xl shadow border border-amber-100 p-4 mb-4">
-            <h2 className="font-bold text-amber-800 mb-3 flex items-center gap-2">
-              <FaShoppingCart size={16} />
-              Panier — {nbArticles} article{nbArticles > 1 ? 's' : ''}
-            </h2>
-
-            {panier.map(p => {
-              const produitReel = produits.find(pr => pr.id === p.id);
-              const stockMax = produitReel?.stock_restant ?? 0;
-              return (
-                <div key={p.id} className="flex items-center justify-between py-2 border-b border-amber-50 last:border-0">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-gray-800 truncate">{p.nom}</p>
-                    <p className="text-xs text-amber-600">{p.prix.toLocaleString()} FCFA x {p.quantite}</p>
+          {/* Grille produits */}
+          <div>
+            <div style={{ fontSize: '15px', fontWeight: 700, color: '#F5F5F0', marginBottom: '16px' }}>
+              Sélectionner des articles <span style={{ fontSize: '13px', color: 'rgba(245,245,240,.4)', fontWeight: 400 }}>({produits.filter(p => p.stock_restant > 0).length} disponibles)</span>
+            </div>
+            {succes && (
+              <div style={{ padding: '12px 16px', borderRadius: '12px', background: 'rgba(91,191,137,.1)', border: '1px solid rgba(91,191,137,.25)', color: '#5BBF89', fontSize: '13.5px', textAlign: 'center', marginBottom: '16px', fontWeight: 600 }}>{succes}</div>
+            )}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(170px,1fr))', gap: '14px' }}>
+              {produits.map(produit => {
+                const dansLePanier = panier.find(p => p.id === produit.id);
+                const qte = dansLePanier?.quantite ?? 0;
+                const stockRestant = produit.stock_restant - qte;
+                const epuise = produit.stock_restant === 0;
+                const plein = qte >= produit.stock_restant;
+                return (
+                  <div key={produit.id} style={{ padding: '14px', borderRadius: '16px', background: epuise ? 'rgba(255,255,255,.01)' : 'rgba(255,255,255,.03)', border: `1px solid ${epuise ? 'rgba(255,255,255,.04)' : qte > 0 ? 'rgba(212,175,55,.3)' : 'rgba(255,255,255,.06)'}`, opacity: epuise ? 0.5 : 1 }}>
+                    {produit.image ? (
+                      <img src={produit.image} alt={produit.nom} style={{ width: '100%', height: '84px', objectFit: 'cover', borderRadius: '12px', marginBottom: '12px' }} />
+                    ) : (
+                      <div style={{ height: '84px', borderRadius: '12px', marginBottom: '12px', background: '#1a1a18', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(255,255,255,.06)' }}>
+                        <span className="ms" style={{ fontSize: '32px', color: 'rgba(212,175,55,.3)' }}>image</span>
+                      </div>
+                    )}
+                    <div style={{ fontSize: '13.5px', fontWeight: 600, color: '#F5F5F0', lineHeight: 1.3, marginBottom: '4px' }}>{produit.nom}</div>
+                    <div style={{ fontSize: '11.5px', color: epuise ? '#E37777' : stockRestant <= 2 ? '#F0C040' : 'rgba(245,245,240,.4)', marginBottom: '8px' }}>
+                      {epuise ? 'Épuisé' : `${stockRestant} disponible${stockRestant > 1 ? 's' : ''}`}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: '13.5px', fontWeight: 700, color: '#D4AF37' }}>{produit.prix?.toLocaleString()} FCFA</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {qte > 0 && (
+                          <>
+                            <button onClick={() => retirerDuPanier(produit.id)} style={{ width: '28px', height: '28px', borderRadius: '8px', border: 'none', cursor: 'pointer', background: 'rgba(212,175,55,.15)', color: '#F0C040', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <span className="ms" style={{ fontSize: '16px' }}>remove</span>
+                            </button>
+                            <span style={{ fontSize: '13px', fontWeight: 700, color: '#F0C040', minWidth: '16px', textAlign: 'center' }}>{qte}</span>
+                          </>
+                        )}
+                        <button onClick={() => ajouterAuPanier(produit)} disabled={epuise || plein} style={{ width: '32px', height: '32px', borderRadius: '10px', border: 'none', cursor: epuise || plein ? 'not-allowed' : 'pointer', background: epuise || plein ? 'rgba(255,255,255,.05)' : 'linear-gradient(135deg,#F0C040,#D4AF37)', color: epuise || plein ? 'rgba(245,245,240,.25)' : '#0A0A0A', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <span className="ms" style={{ fontSize: '20px' }}>add</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5 ml-2">
-                    <p className="text-sm font-bold text-amber-800 w-24 text-right shrink-0">
-                      {(p.prix * p.quantite).toLocaleString()} FCFA
-                    </p>
-                    <button
-                      onClick={() => retirerDuPanier(p.id)}
-                      className="bg-amber-100 text-amber-700 p-1.5 rounded-lg hover:bg-amber-200">
-                      <FaMinus size={11} />
-                    </button>
-                    <button
-                      onClick={() => ajouterAuPanier(p)}
-                      disabled={p.quantite >= stockMax}
-                      className={`p-1.5 rounded-lg ${
-                        p.quantite >= stockMax
-                          ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
-                          : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-                      }`}>
-                      <FaPlus size={11} />
-                    </button>
-                    <button
-                      onClick={() => supprimerDuPanier(p.id)}
-                      className="bg-red-100 text-red-500 p-1.5 rounded-lg hover:bg-red-200">
-                      <FaTrash size={11} />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
+          </div>
 
-            <div className="mt-3 pt-3 border-t border-amber-100">
-              <p className="text-right font-bold text-amber-800 text-lg">
-                Total : {total.toLocaleString()} FCFA
-              </p>
+          {/* Panier sticky */}
+          <div style={{ position: 'sticky', top: '88px', padding: '24px', borderRadius: '20px', background: 'rgba(255,255,255,.04)', border: '1px solid rgba(212,175,55,.14)', backdropFilter: 'blur(22px)', boxShadow: '0 12px 40px rgba(0,0,0,.35)', height: 'fit-content' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '18px' }}>
+              <span className="ms" style={{ fontSize: '22px', color: '#F0C040' }}>shopping_bag</span>
+              <span style={{ fontSize: '16px', fontWeight: 700, color: '#F5F5F0' }}>Panier</span>
+              {nbArticles > 0 && <span style={{ marginLeft: 'auto', fontSize: '12px', fontWeight: 700, color: '#F0C040', background: 'rgba(212,175,55,.15)', padding: '3px 10px', borderRadius: '20px' }}>{nbArticles} article{nbArticles > 1 ? 's' : ''}</span>}
             </div>
 
-            {/* INFOS CLIENTE */}
-            <div className="mt-4 space-y-3">
-              <div className="flex items-center gap-2">
-                <MdPerson size={20} className="text-amber-600" />
-                <h3 className="font-semibold text-amber-800">Infos Cliente</h3>
-              </div>
-              <input
-                placeholder="Nom de la cliente *"
-                value={cliente.nom}
-                onChange={e => setCliente({ ...cliente, nom: e.target.value })}
-                className="w-full border border-amber-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-400"
-              />
-              <input
-                placeholder="Telephone (optionnel)"
-                value={cliente.telephone}
-                onChange={e => setCliente({ ...cliente, telephone: e.target.value })}
-                className="w-full border border-amber-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-400"
-              />
+            {erreur && (
+              <div style={{ padding: '10px 14px', borderRadius: '10px', background: 'rgba(227,119,119,.1)', border: '1px solid rgba(227,119,119,.25)', color: '#E37777', fontSize: '12.5px', marginBottom: '14px', textAlign: 'center' }}>{erreur}</div>
+            )}
 
-              {/* PAIEMENT */}
-              <div className="flex items-center gap-2 mt-2">
-                <MdAttachMoney size={20} className="text-amber-600" />
-                <h3 className="font-semibold text-amber-800">Paiement</h3>
+            {/* Articles */}
+            {panier.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '24px 0', color: 'rgba(245,245,240,.3)', fontSize: '13px' }}>
+                <span className="ms" style={{ fontSize: '36px', display: 'block', marginBottom: '8px' }}>shopping_cart</span>
+                Panier vide
               </div>
-              <div className="flex gap-2">
-                {['cash', 'mobile_money', 'orange_money'].map(mode => (
-                  <button key={mode}
-                    onClick={() => setModePaiement(mode)}
-                    className={`flex-1 py-2 rounded-xl text-xs font-semibold border transition ${
-                      modePaiement === mode
-                        ? 'bg-amber-700 text-white border-amber-700'
-                        : 'bg-white text-amber-700 border-amber-200 hover:bg-amber-50'
-                    }`}>
-                    {mode === 'cash' ? 'Cash' : mode === 'mobile_money' ? 'Mobile Money' : 'Orange Money'}
-                  </button>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '16px', maxHeight: '200px', overflowY: 'auto', paddingRight: '4px' }}>
+                {panier.map(p => (
+                  <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{ width: '30px', height: '30px', borderRadius: '9px', background: 'rgba(212,175,55,.12)', border: '1px solid rgba(212,175,55,.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: 700, color: '#F0C040', flexShrink: 0 }}>{p.quantite}</div>
+                    <div style={{ flex: 1, minWidth: 0, fontSize: '13.5px', fontWeight: 500, color: '#F5F5F0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nom}</div>
+                    <div style={{ fontSize: '13.5px', fontWeight: 700, color: '#F5F5F0', flexShrink: 0 }}>{(p.prix * p.quantite).toLocaleString()}</div>
+                    <button onClick={() => supprimerDuPanier(p.id)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'rgba(227,119,119,.7)', padding: '4px', display: 'flex' }}>
+                      <span className="ms" style={{ fontSize: '16px' }}>close</span>
+                    </button>
+                  </div>
                 ))}
               </div>
+            )}
 
-              <input
-                type="number"
-                placeholder="Montant paye *"
-                value={montantPaye}
-                onChange={e => setMontantPaye(e.target.value === '' ? '' : Number(e.target.value))}
-                min="0"
-                className="w-full border border-amber-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-400"
-              />
+            <div style={{ height: '1px', background: 'rgba(255,255,255,.08)', margin: '4px 0 16px' }} />
 
-              {montantPayeNum > 0 && resteAPayer > 0 && (
-                <div className="bg-orange-50 border border-orange-200 rounded-xl p-3">
-                  <p className="text-orange-700 text-sm font-semibold">
-                    Reste a payer : {resteAPayer.toLocaleString()} FCFA
-                  </p>
-                </div>
-              )}
-
-              {montantPayeNum > 0 && resteAPayer === 0 && (
-                <div className="bg-green-50 border border-green-200 rounded-xl p-3">
-                  <p className="text-green-700 text-sm font-semibold">
-                    Paiement complet
-                    {montantPayeNum > total && ` — Monnaie a rendre : ${(montantPayeNum - total).toLocaleString()} FCFA`}
-                  </p>
-                </div>
-              )}
-
-              <button
-                onClick={enregistrerVente}
-                disabled={enregistrement}
-                className="w-full bg-amber-700 text-white py-3 rounded-xl font-bold text-sm hover:bg-amber-800 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                {enregistrement ? 'Enregistrement en cours...' : 'Enregistrer la vente'}
-              </button>
+            {/* Infos cliente */}
+            <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '.5px', color: 'rgba(245,245,240,.45)', textTransform: 'uppercase', marginBottom: '10px' }}>Informations cliente</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
+              <input style={inputStyle} placeholder="Nom de la cliente *" value={cliente.nom} onChange={e => setCliente({ ...cliente, nom: e.target.value })} />
+              <input style={inputStyle} placeholder="Téléphone (optionnel)" value={cliente.telephone} onChange={e => setCliente({ ...cliente, telephone: e.target.value })} />
             </div>
-          </div>
-        )}
 
-        {/* LISTE PRODUITS */}
-        <h2 className="font-bold text-amber-800 mb-3">
-          Produits disponibles ({produits.filter(p => p.stock_restant > 0).length} en stock)
-        </h2>
-        <div className="space-y-2">
-          {produits.map(produit => {
-            const dansLePanier = panier.find(p => p.id === produit.id);
-            const quantitePanier = dansLePanier?.quantite ?? 0;
-            const stockRestant = produit.stock_restant - quantitePanier;
-            const epuise = produit.stock_restant === 0;
-            const panierPlein = quantitePanier >= produit.stock_restant;
-
-            return (
-              <div key={produit.id}
-                className={`bg-white rounded-xl p-3 shadow border flex items-center gap-3 ${
-                  epuise ? 'opacity-50 border-red-100' : 'border-amber-100'
-                }`}>
-                {produit.image ? (
-                  <img src={produit.image} alt={produit.nom}
-                    className="w-14 h-14 object-contain rounded-lg bg-amber-50 shrink-0" />
-                ) : (
-                  <div className="w-14 h-14 bg-amber-50 rounded-lg shrink-0" />
-                )}
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-800 truncate">{produit.nom}</p>
-                  <p className="text-xs text-amber-600 font-bold">{produit.prix?.toLocaleString()} FCFA</p>
-                  <p className={`text-xs font-medium ${
-                    epuise ? 'text-red-500' :
-                    stockRestant <= 2 ? 'text-orange-500' :
-                    'text-green-600'
-                  }`}>
-                    {epuise
-                      ? 'Rupture de stock'
-                      : panierPlein
-                      ? `Max atteint (${produit.stock_restant} en stock)`
-                      : `Stock : ${stockRestant} disponible${stockRestant > 1 ? 's' : ''}`
-                    }
-                  </p>
-                </div>
-                {quantitePanier > 0 && (
-                  <span className="bg-amber-100 text-amber-800 text-xs font-bold px-2 py-1 rounded-lg">
-                    x{quantitePanier}
-                  </span>
-                )}
-                <button
-                  onClick={() => ajouterAuPanier(produit)}
-                  disabled={epuise || panierPlein}
-                  className={`p-2.5 rounded-xl shrink-0 ${
-                    epuise || panierPlein
-                      ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
-                      : 'bg-amber-700 text-white hover:bg-amber-800'
-                  }`}>
-                  <FaPlus size={16} />
+            {/* Statut paiement */}
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
+              {([['paye', 'check_circle', 'Payé complet'], ['partiel', 'schedule', 'Partiel']] as const).map(([val, icon, label]) => (
+                <button key={val} onClick={() => setStatutPaiement(val)} style={{ flex: 1, height: '42px', borderRadius: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '7px', cursor: 'pointer', fontSize: '13px', fontWeight: 600, background: statutPaiement === val ? 'linear-gradient(135deg,rgba(240,192,64,.16),rgba(212,175,55,.05))' : 'rgba(255,255,255,.03)', border: `1px solid ${statutPaiement === val ? 'rgba(212,175,55,.3)' : 'rgba(255,255,255,.08)'}`, color: statutPaiement === val ? '#F0C040' : 'rgba(245,245,240,.6)' }}>
+                  <span className="ms" style={{ fontSize: '18px' }}>{icon}</span>{label}
                 </button>
+              ))}
+            </div>
+
+            {/* Mode paiement */}
+            <div style={{ display: 'flex', gap: '6px', marginBottom: '14px' }}>
+              {[['cash', 'Cash'], ['mobile_money', 'Mobile Money'], ['orange_money', 'Orange']].map(([val, label]) => (
+                <button key={val} onClick={() => setModePaiement(val)} style={{ flex: 1, height: '36px', borderRadius: '10px', border: `1px solid ${modePaiement === val ? 'rgba(212,175,55,.4)' : 'rgba(255,255,255,.08)'}`, background: modePaiement === val ? 'rgba(212,175,55,.12)' : 'transparent', color: modePaiement === val ? '#F0C040' : 'rgba(245,245,240,.5)', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer' }}>{label}</button>
+              ))}
+            </div>
+
+            {/* Montant partiel */}
+            {statutPaiement === 'partiel' && (
+              <div style={{ marginBottom: '14px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '.4px', color: 'rgba(245,245,240,.45)', textTransform: 'uppercase', marginBottom: '6px' }}>Montant payé (FCFA) *</div>
+                <input type="number" style={inputStyle} placeholder="0" value={montantPaye} onChange={e => setMontantPaye(e.target.value === '' ? '' : Number(e.target.value))} min="0" />
+                {montantPayeNum > 0 && resteAPayer > 0 && (
+                  <div style={{ marginTop: '8px', padding: '10px 14px', borderRadius: '10px', background: 'rgba(240,192,64,.08)', border: '1px solid rgba(240,192,64,.2)', fontSize: '13px', color: '#F0C040', fontWeight: 600 }}>
+                    Reste à payer : {resteAPayer.toLocaleString()} FCFA
+                  </div>
+                )}
               </div>
-            );
-          })}
+            )}
+
+            {/* Monnaie à rendre (paiement complet) */}
+            {statutPaiement === 'paye' && montantPayeNum > total && (
+              <div style={{ marginBottom: '14px', padding: '10px 14px', borderRadius: '10px', background: 'rgba(91,191,137,.08)', border: '1px solid rgba(91,191,137,.2)', fontSize: '13px', color: '#5BBF89', fontWeight: 600 }}>
+                Monnaie à rendre : {(montantPayeNum - total).toLocaleString()} FCFA
+              </div>
+            )}
+
+            {/* Total */}
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '14px 0', marginBottom: '14px', borderTop: '1px solid rgba(255,255,255,.06)' }}>
+              <span style={{ fontSize: '14px', color: 'rgba(245,245,240,.6)' }}>Total</span>
+              <span>
+                <span style={{ fontSize: '28px', fontWeight: 800, color: '#F5F5F0' }}>{total.toLocaleString()}</span>
+                <span style={{ fontSize: '13px', color: '#D4AF37', fontWeight: 700, marginLeft: '5px' }}>FCFA</span>
+              </span>
+            </div>
+
+            <button onClick={enregistrerVente} disabled={enregistrement || panier.length === 0} style={{ width: '100%', height: '52px', border: 'none', borderRadius: '15px', cursor: enregistrement || panier.length === 0 ? 'not-allowed' : 'pointer', background: panier.length === 0 ? 'rgba(212,175,55,.15)' : 'linear-gradient(135deg,#F0C040,#D4AF37)', color: '#0A0A0A', fontSize: '15px', fontWeight: 700, boxShadow: panier.length > 0 ? '0 12px 30px rgba(212,175,55,.28)' : 'none', opacity: enregistrement ? 0.7 : 1 }}>
+              {enregistrement ? 'Enregistrement...' : 'Valider la vente'}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

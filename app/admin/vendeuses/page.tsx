@@ -1,9 +1,15 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { FaArrowLeft, FaUsers, FaTrophy, FaMedal, FaChevronDown, FaChevronUp } from 'react-icons/fa';
-import { MdAttachMoney, MdShoppingCart } from 'react-icons/md';
 import { supabase } from '@/lib/supabase';
+
+const MEDALS = [
+  { color: '#F0C040', bg: 'rgba(240,192,64,.14)', border: 'rgba(240,192,64,.4)', icon: 'emoji_events', cardBg: 'linear-gradient(180deg,rgba(240,192,64,.08),rgba(255,255,255,.02))' },
+  { color: '#CDD0D6', bg: 'rgba(205,208,214,.12)', border: 'rgba(205,208,214,.35)', icon: 'workspace_premium', cardBg: 'linear-gradient(180deg,rgba(205,208,214,.05),rgba(255,255,255,.02))' },
+  { color: '#D08B53', bg: 'rgba(208,139,83,.13)', border: 'rgba(208,139,83,.35)', icon: 'military_tech', cardBg: 'linear-gradient(180deg,rgba(208,139,83,.06),rgba(255,255,255,.02))' },
+];
+
+const BADGE_PAID = { fontSize: '12px', fontWeight: 700, color: '#5BBF89', background: 'rgba(91,191,137,.13)', border: '1px solid rgba(91,191,137,.25)', padding: '4px 10px', borderRadius: '20px' } as const;
+const BADGE_PART = { fontSize: '12px', fontWeight: 700, color: '#F0C040', background: 'rgba(240,192,64,.13)', border: '1px solid rgba(240,192,64,.28)', padding: '4px 10px', borderRadius: '20px' } as const;
 
 export default function AdminVendeuses() {
   const [vendeuses, setVendeuses] = useState<any[]>([]);
@@ -11,264 +17,129 @@ export default function AdminVendeuses() {
   const [detailOuvert, setDetailOuvert] = useState<number | null>(null);
   const [ventesDetail, setVentesDetail] = useState<any[]>([]);
   const [chargementDetail, setChargementDetail] = useState(false);
-  const router = useRouter();
 
   useEffect(() => {
-    const userData = localStorage.getItem('fallora_user');
-    if (!userData) { router.push('/'); return; }
     chargerVendeuses();
-
-    const canal = supabase
-      .channel('vendeuses')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'ventes' }, () => {
-        chargerVendeuses();
-      })
-      .subscribe();
-
+    const canal = supabase.channel('vendeuses').on('postgres_changes', { event: '*', schema: 'public', table: 'ventes' }, () => chargerVendeuses()).subscribe();
     return () => { supabase.removeChannel(canal); };
   }, []);
 
   const chargerVendeuses = async () => {
-    // 1. Vendeuses actives
-    const { data: utilisateurs } = await supabase
-      .from('utilisateurs')
-      .select('*')
-      .eq('role', 'vendeuse')
-      .eq('actif', true);
-
-    // 2. Toutes les ventes non annulees
-    const { data: ventes } = await supabase
-      .from('ventes')
-      .select('*')
-      .eq('annulee', false);
-
-    // 3. Tous les vente_produits
+    const { data: utilisateurs } = await supabase.from('utilisateurs').select('*').eq('role', 'vendeuse').eq('actif', true);
+    const { data: ventes } = await supabase.from('ventes').select('*').eq('annulee', false);
     const venteIds = (ventes || []).map((v: any) => v.id);
-    const { data: venteProduits } = venteIds.length > 0
-      ? await supabase.from('vente_produits').select('vente_id, quantite').in('vente_id', venteIds)
-      : { data: [] };
-
-    // 4. Calcul des stats par vendeuse
-    const vendeusesAvecStats = (utilisateurs || []).map((u: any) => {
-      const ventesVendeuse = (ventes || []).filter((v: any) => v.vendeuse_id === u.id);
-      const totalVentes = ventesVendeuse.reduce((sum: number, v: any) => sum + v.total, 0);
-      const totalEncaisse = ventesVendeuse.reduce((sum: number, v: any) => sum + v.montant_paye, 0);
-      const nbVentes = ventesVendeuse.length;
-      const venteIdsVendeuse = ventesVendeuse.map((v: any) => v.id);
-      const nbProduits = (venteProduits || [])
-        .filter((vp: any) => venteIdsVendeuse.includes(vp.vente_id))
-        .reduce((sum: number, vp: any) => sum + vp.quantite, 0);
-      return { ...u, totalVentes, totalEncaisse, nbVentes, nbProduits };
+    const { data: venteProduits } = venteIds.length > 0 ? await supabase.from('vente_produits').select('vente_id, quantite').in('vente_id', venteIds) : { data: [] };
+    const result = (utilisateurs || []).map((u: any) => {
+      const vv = (ventes || []).filter((v: any) => v.vendeuse_id === u.id);
+      const ids = vv.map((v: any) => v.id);
+      return { ...u, totalVentes: vv.reduce((s: number, v: any) => s + v.total, 0), totalEncaisse: vv.reduce((s: number, v: any) => s + v.montant_paye, 0), nbVentes: vv.length, nbProduits: (venteProduits || []).filter((vp: any) => ids.includes(vp.vente_id)).reduce((s: number, vp: any) => s + vp.quantite, 0) };
     }).sort((a: any, b: any) => b.totalVentes - a.totalVentes);
-
-    setVendeuses(vendeusesAvecStats);
+    setVendeuses(result);
     setChargement(false);
   };
 
   const voirDetail = async (vendeuseId: number) => {
-    if (detailOuvert === vendeuseId) {
-      setDetailOuvert(null);
-      setVentesDetail([]);
-      return;
-    }
-    setDetailOuvert(vendeuseId);
-    setChargementDetail(true);
-
-    // 1. Ventes de cette vendeuse
-    const { data: ventesData } = await supabase
-      .from('ventes')
-      .select('*')
-      .eq('vendeuse_id', vendeuseId)
-      .eq('annulee', false)
-      .order('date_vente', { ascending: false });
-
-    if (!ventesData || ventesData.length === 0) {
-      setVentesDetail([]);
-      setChargementDetail(false);
-      return;
-    }
-
-    // 2. Clientes
+    if (detailOuvert === vendeuseId) { setDetailOuvert(null); setVentesDetail([]); return; }
+    setDetailOuvert(vendeuseId); setChargementDetail(true);
+    const { data: ventesData } = await supabase.from('ventes').select('*').eq('vendeuse_id', vendeuseId).eq('annulee', false).order('date_vente', { ascending: false });
+    if (!ventesData || ventesData.length === 0) { setVentesDetail([]); setChargementDetail(false); return; }
     const clienteIds = [...new Set(ventesData.map((v: any) => v.cliente_id).filter(Boolean))];
-    const { data: clientes } = await supabase.from('clientes').select('*').in('id', clienteIds);
-
-    // 3. Vente_produits
+    const { data: clientes } = clienteIds.length > 0 ? await supabase.from('clientes').select('id, nom').in('id', clienteIds) : { data: [] };
     const venteIds = ventesData.map((v: any) => v.id);
-    const { data: venteProduits } = await supabase.from('vente_produits').select('*').in('vente_id', venteIds);
-
-    // 4. Produits
-    const produitIds = [...new Set((venteProduits || []).map((vp: any) => vp.produit_id).filter(Boolean))];
-    const { data: produits } = produitIds.length > 0
-      ? await supabase.from('produits').select('id, nom').in('id', produitIds)
-      : { data: [] };
-
-    // 5. Assemblage
-    const ventesAssemblees = ventesData.map((v: any) => ({
-      ...v,
-      clientes: (clientes || []).find((c: any) => c.id === v.cliente_id) || null,
-      vente_produits: (venteProduits || [])
-        .filter((vp: any) => vp.vente_id === v.id)
-        .map((vp: any) => ({
-          ...vp,
-          produits: (produits || []).find((p: any) => p.id === vp.produit_id) || null,
-        })),
-    }));
-
-    setVentesDetail(ventesAssemblees);
+    const { data: vp } = await supabase.from('vente_produits').select('*').in('vente_id', venteIds);
+    const produitIds = [...new Set((vp || []).map((x: any) => x.produit_id).filter(Boolean))];
+    const { data: produits } = produitIds.length > 0 ? await supabase.from('produits').select('id, nom').in('id', produitIds) : { data: [] };
+    setVentesDetail(ventesData.map((v: any) => ({ ...v, cliente: (clientes || []).find((c: any) => c.id === v.cliente_id) || null, vente_produits: (vp || []).filter((x: any) => x.vente_id === v.id).map((x: any) => ({ ...x, produits: (produits || []).find((p: any) => p.id === x.produit_id) })) })));
     setChargementDetail(false);
   };
 
-  const getMedaille = (index: number) => {
-    if (index === 0) return <FaTrophy size={20} className="text-yellow-500" />;
-    if (index === 1) return <FaMedal size={20} className="text-gray-400" />;
-    if (index === 2) return <FaMedal size={20} className="text-amber-600" />;
-    return null;
-  };
+  if (chargement) return <div style={{ textAlign: 'center', padding: '60px', color: 'rgba(245,245,240,.4)' }}>Chargement...</div>;
 
   return (
-    <div className="min-h-screen bg-amber-50">
-      <nav className="bg-amber-800 text-white px-6 py-4 flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <button onClick={() => router.push('/admin')} className="hover:bg-amber-700 p-2 rounded-lg">
-            <FaArrowLeft size={16} />
-          </button>
-          <FaUsers size={24} />
-          <h1 className="text-xl font-bold">Performance Vendeuses</h1>
+    <div className="fade-up">
+      {/* Podium top 3 */}
+      {vendeuses.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: '18px', marginBottom: '24px' }}>
+          {vendeuses.slice(0, 3).map((v, i) => {
+            const m = MEDALS[i];
+            return (
+              <div key={v.id} style={{ padding: '24px', borderRadius: '20px', background: m.cardBg, border: `1px solid ${m.border}`, backdropFilter: 'blur(20px)', textAlign: 'center', boxShadow: '0 8px 30px rgba(0,0,0,.3)' }}>
+                <div style={{ width: '58px', height: '58px', margin: '0 auto 14px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: m.bg, border: `1.5px solid ${m.border}` }}>
+                  <span className="ms" style={{ fontSize: '30px', color: m.color }}>{m.icon}</span>
+                </div>
+                <div style={{ fontSize: '17px', fontWeight: 700, color: '#F5F5F0' }}>{v.nom}</div>
+                <div style={{ fontSize: '12.5px', color: 'rgba(245,245,240,.45)', marginBottom: '14px' }}>{v.nbVentes} ventes · {v.nbProduits} articles</div>
+                <div style={{ fontSize: '24px', fontWeight: 800, color: m.color }}>{v.totalVentes.toLocaleString()}</div>
+                <div style={{ fontSize: '11px', letterSpacing: '1px', color: 'rgba(245,245,240,.4)', textTransform: 'uppercase' }}>FCFA réalisés</div>
+              </div>
+            );
+          })}
         </div>
-        <div className="bg-green-500 text-white text-xs px-3 py-1 rounded-full font-semibold">
-          TEMPS REEL
+      )}
+
+      {/* Table complète */}
+      <div style={{ borderRadius: '20px', background: 'rgba(255,255,255,.025)', border: '1px solid rgba(255,255,255,.06)', overflow: 'hidden' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '60px 1.6fr 1fr 1fr 1fr 60px', gap: '16px', padding: '14px 24px', background: 'rgba(255,255,255,.03)', borderBottom: '1px solid rgba(255,255,255,.06)', fontSize: '11.5px', fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase' as const, color: 'rgba(245,245,240,.45)' }}>
+          <div>Rang</div><div>Vendeuse</div><div>Ventes FCFA</div><div>Transactions</div><div>Produits</div><div />
         </div>
-      </nav>
-
-      <div className="p-6 max-w-4xl mx-auto">
-        {chargement ? (
-          <div className="text-center py-12 text-amber-600">Chargement...</div>
-        ) : vendeuses.length === 0 ? (
-          <div className="bg-white rounded-2xl p-8 text-center shadow">
-            <FaUsers size={48} className="text-amber-300 mx-auto mb-4" />
-            <p className="text-gray-500">Aucune vendeuse trouvee.</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {vendeuses.map((vendeuse, index) => (
-              <div key={vendeuse.id}
-                className={`bg-white rounded-2xl shadow border ${
-                  index === 0 ? 'border-yellow-200' :
-                  index === 1 ? 'border-gray-200' :
-                  index === 2 ? 'border-amber-200' : 'border-amber-100'
-                }`}>
-                <div className="p-5">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${
-                        index === 0 ? 'bg-yellow-500' :
-                        index === 1 ? 'bg-gray-400' :
-                        index === 2 ? 'bg-amber-600' : 'bg-amber-800'
-                      }`}>
-                        {vendeuse.nom.charAt(0).toUpperCase()}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="font-bold text-amber-800">{vendeuse.nom}</p>
-                          {getMedaille(index)}
-                        </div>
-                        <p className="text-xs text-gray-400">{vendeuse.email}</p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-2xl font-bold text-amber-800">
-                        {vendeuse.totalVentes.toLocaleString()} FCFA
-                      </p>
-                      <p className="text-xs text-gray-500">Total ventes</p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-3 mb-4">
-                    <div className="bg-amber-50 rounded-xl p-3 text-center">
-                      <MdShoppingCart size={20} className="text-amber-600 mx-auto mb-1" />
-                      <p className="text-xl font-bold text-amber-800">{vendeuse.nbVentes}</p>
-                      <p className="text-xs text-gray-500">Commandes</p>
-                    </div>
-                    <div className="bg-green-50 rounded-xl p-3 text-center">
-                      <MdAttachMoney size={20} className="text-green-600 mx-auto mb-1" />
-                      <p className="text-lg font-bold text-green-700">
-                        {vendeuse.totalEncaisse.toLocaleString()}
-                      </p>
-                      <p className="text-xs text-gray-500">Encaisse FCFA</p>
-                    </div>
-                    <div className="bg-blue-50 rounded-xl p-3 text-center">
-                      <FaUsers size={16} className="text-blue-500 mx-auto mb-1" />
-                      <p className="text-xl font-bold text-blue-700">{vendeuse.nbProduits}</p>
-                      <p className="text-xs text-gray-500">Produits vendus</p>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => voirDetail(vendeuse.id)}
-                    className="w-full flex items-center justify-center gap-2 bg-amber-50 text-amber-700 py-2 rounded-xl text-sm font-semibold hover:bg-amber-100 border border-amber-200">
-                    {detailOuvert === vendeuse.id ? <FaChevronUp size={14} /> : <FaChevronDown size={14} />}
-                    {detailOuvert === vendeuse.id ? 'Masquer les details' : 'Voir les details des ventes'}
+        {vendeuses.map((v, i) => {
+          const m = MEDALS[i];
+          const rankStyle = m
+            ? { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '30px', height: '30px', borderRadius: '10px', fontSize: '14px', fontWeight: 800, color: m.color, background: m.bg, border: `1px solid ${m.border}` }
+            : { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '30px', height: '30px', borderRadius: '10px', fontSize: '14px', fontWeight: 700, color: 'rgba(245,245,240,.5)', background: 'rgba(255,255,255,.04)' };
+          return (
+            <div key={v.id}>
+              <div style={{ display: 'grid', gridTemplateColumns: '60px 1.6fr 1fr 1fr 1fr 60px', gap: '16px', padding: '15px 24px', borderBottom: '1px solid rgba(255,255,255,.04)', alignItems: 'center' }}>
+                <div><span style={rankStyle as any}>{i + 1}</span></div>
+                <div style={{ fontSize: '14.5px', fontWeight: 600, color: '#F5F5F0' }}>{v.nom}</div>
+                <div style={{ fontSize: '14.5px', fontWeight: 700, color: '#D4AF37' }}>{v.totalVentes.toLocaleString()}</div>
+                <div style={{ fontSize: '14px', color: 'rgba(245,245,240,.7)' }}>{v.nbVentes}</div>
+                <div style={{ fontSize: '14px', color: 'rgba(245,245,240,.7)' }}>{v.nbProduits}</div>
+                <div>
+                  <button onClick={() => voirDetail(v.id)} style={{ background: 'rgba(212,175,55,.1)', border: '1px solid rgba(212,175,55,.25)', borderRadius: '8px', padding: '6px', cursor: 'pointer', display: 'flex' }}>
+                    <span className="ms" style={{ fontSize: '18px', color: '#F0C040' }}>{detailOuvert === v.id ? 'expand_less' : 'expand_more'}</span>
                   </button>
                 </div>
-
-                {detailOuvert === vendeuse.id && (
-                  <div className="border-t border-amber-100 p-5 bg-amber-50 rounded-b-2xl">
-                    {chargementDetail ? (
-                      <p className="text-center text-amber-600 text-sm">Chargement...</p>
-                    ) : ventesDetail.length === 0 ? (
-                      <p className="text-center text-gray-500 text-sm">Aucune vente.</p>
-                    ) : (
-                      <div className="space-y-3">
-                        {ventesDetail.map(vente => (
-                          <div key={vente.id} className="bg-white rounded-xl p-3 border border-amber-100">
-                            <div className="flex justify-between items-start mb-2">
-                              <div>
-                                <p className="font-semibold text-amber-800 text-sm">
-                                  {vente.clientes?.nom || 'Cliente inconnue'}
-                                </p>
-                                <p className="text-xs text-gray-400">
-                                  {new Date(vente.date_vente).toLocaleString('fr-FR')}
-                                </p>
-                              </div>
-                              <div className="text-right">
-                                <p className="font-bold text-amber-800">{vente.total?.toLocaleString()} FCFA</p>
-                                <span className={`text-xs px-2 py-0.5 rounded-full ${
-                                  vente.statut_paiement === 'paye'
-                                    ? 'bg-green-100 text-green-700'
-                                    : 'bg-orange-100 text-orange-700'
-                                }`}>
-                                  {vente.statut_paiement === 'paye'
-                                    ? 'Paye'
-                                    : `Reste : ${vente.reste_a_payer?.toLocaleString()} FCFA`}
-                                </span>
-                              </div>
-                            </div>
-                            {vente.vente_produits?.length > 0 && (
-                              <div className="border-t border-amber-50 pt-2">
-                                <p className="text-xs text-gray-400 mb-1">Produits achetes :</p>
-                                {vente.vente_produits.map((vp: any, i: number) => (
-                                  <div key={i} className="flex justify-between text-xs py-0.5">
-                                    <span className="text-gray-700">
-                                      {vp.produits?.nom || 'Inconnu'}{' '}
-                                      <span className="text-amber-600 font-bold">x{vp.quantite}</span>
-                                    </span>
-                                    <span className="text-amber-700 font-semibold">
-                                      {(vp.prix_unitaire * vp.quantite).toLocaleString()} FCFA
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
-            ))}
-          </div>
-        )}
+              {detailOuvert === v.id && (
+                <div style={{ padding: '16px 24px 20px', background: 'rgba(255,255,255,.015)', borderBottom: '1px solid rgba(255,255,255,.04)' }}>
+                  {chargementDetail ? (
+                    <p style={{ color: 'rgba(245,245,240,.4)', fontSize: '13px', textAlign: 'center' }}>Chargement...</p>
+                  ) : ventesDetail.length === 0 ? (
+                    <p style={{ color: 'rgba(245,245,240,.4)', fontSize: '13px', textAlign: 'center' }}>Aucune vente.</p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {ventesDetail.map(vente => (
+                        <div key={vente.id} style={{ padding: '14px 18px', borderRadius: '14px', background: 'rgba(255,255,255,.03)', border: '1px solid rgba(255,255,255,.06)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                            <div>
+                              <div style={{ fontSize: '14px', fontWeight: 600, color: '#F5F5F0' }}>{vente.cliente?.nom || 'Inconnue'}</div>
+                              <div style={{ fontSize: '12px', color: 'rgba(245,245,240,.4)' }}>{new Date(vente.date_vente).toLocaleString('fr-FR')}</div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontSize: '15px', fontWeight: 700, color: '#F5F5F0' }}>{vente.total?.toLocaleString()} <span style={{ fontSize: '11px', color: '#D4AF37' }}>FCFA</span></div>
+                              <span style={vente.statut_paiement === 'paye' ? BADGE_PAID : BADGE_PART}>{vente.statut_paiement === 'paye' ? 'Payé' : `Reste : ${vente.reste_a_payer?.toLocaleString()} FCFA`}</span>
+                            </div>
+                          </div>
+                          {vente.vente_produits?.length > 0 && (
+                            <div style={{ borderTop: '1px solid rgba(255,255,255,.05)', paddingTop: '8px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              {vente.vente_produits.map((vp: any, j: number) => (
+                                <div key={j} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12.5px' }}>
+                                  <span style={{ color: 'rgba(245,245,240,.7)' }}>{vp.produits?.nom || 'Inconnu'} <span style={{ color: '#D4AF37', fontWeight: 700 }}>x{vp.quantite}</span></span>
+                                  <span style={{ color: '#F5F5F0', fontWeight: 600 }}>{(vp.prix_unitaire * vp.quantite).toLocaleString()} FCFA</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
