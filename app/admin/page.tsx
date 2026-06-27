@@ -34,23 +34,27 @@ export default function AdminDashboard() {
   }, []);
 
   const chargerStats = async () => {
+    // Ventes non annulees
     const { data: ventes } = await supabase
       .from('ventes')
-      .select('total, montant_paye, reste_a_payer')
+      .select('id, total, reste_a_payer')
       .eq('annulee', false);
 
-    const { data: venteProduits } = await supabase
-      .from('vente_produits')
-      .select('quantite');
+    // Produits vendus uniquement dans les ventes non annulees
+    const venteIds = (ventes || []).map((v: any) => v.id);
+    const { data: venteProduits } = venteIds.length > 0
+      ? await supabase.from('vente_produits').select('quantite').in('vente_id', venteIds)
+      : { data: [] };
 
+    // Stock restant
     const { data: produits } = await supabase
       .from('produits')
       .select('stock_restant');
 
-    const totalVentes = (ventes || []).reduce((sum, v) => sum + v.total, 0);
-    const totalProduits = (venteProduits || []).reduce((sum, vp) => sum + vp.quantite, 0);
-    const stockRestant = (produits || []).reduce((sum, p) => sum + p.stock_restant, 0);
-    const paiementsEnAttente = (ventes || []).reduce((sum, v) => sum + v.reste_a_payer, 0);
+    const totalVentes = (ventes || []).reduce((sum: number, v: any) => sum + v.total, 0);
+    const totalProduits = (venteProduits || []).reduce((sum: number, vp: any) => sum + vp.quantite, 0);
+    const stockRestant = (produits || []).reduce((sum: number, p: any) => sum + p.stock_restant, 0);
+    const paiementsEnAttente = (ventes || []).reduce((sum: number, v: any) => sum + v.reste_a_payer, 0);
 
     setStats({ totalVentes, totalProduits, stockRestant, paiementsEnAttente });
   };

@@ -18,18 +18,55 @@ export default function AdminRapports() {
   }, []);
 
   const chargerDonnees = async () => {
-    const { data } = await supabase
+    // 1. Ventes non annulees
+    const { data: ventesData } = await supabase
       .from('ventes')
-      .select(`
-        *,
-        clientes (nom, telephone),
-        utilisateurs (nom),
-        vente_produits (quantite, prix_unitaire, produits (nom)),
-        paiements (montant, mode)
-      `)
+      .select('*')
       .eq('annulee', false)
       .order('date_vente', { ascending: false });
-    setVentes(data || []);
+
+    if (!ventesData || ventesData.length === 0) {
+      setVentes([]);
+      setChargement(false);
+      return;
+    }
+
+    // 2. Clientes
+    const clienteIds = [...new Set(ventesData.map((v: any) => v.cliente_id).filter(Boolean))];
+    const { data: clientes } = await supabase.from('clientes').select('*').in('id', clienteIds);
+
+    // 3. Vendeuses
+    const userIds = [...new Set(ventesData.map((v: any) => v.vendeuse_id).filter(Boolean))];
+    const { data: utilisateurs } = await supabase.from('utilisateurs').select('id, nom').in('id', userIds);
+
+    // 4. Vente_produits
+    const venteIds = ventesData.map((v: any) => v.id);
+    const { data: venteProduits } = await supabase.from('vente_produits').select('*').in('vente_id', venteIds);
+
+    // 5. Produits
+    const produitIds = [...new Set((venteProduits || []).map((vp: any) => vp.produit_id).filter(Boolean))];
+    const { data: produits } = produitIds.length > 0
+      ? await supabase.from('produits').select('id, nom').in('id', produitIds)
+      : { data: [] };
+
+    // 6. Paiements
+    const { data: paiements } = await supabase.from('paiements').select('*').in('vente_id', venteIds);
+
+    // 7. Assemblage
+    const ventesAssemblees = ventesData.map((v: any) => ({
+      ...v,
+      clientes: (clientes || []).find((c: any) => c.id === v.cliente_id) || null,
+      utilisateurs: (utilisateurs || []).find((u: any) => u.id === v.vendeuse_id) || null,
+      vente_produits: (venteProduits || [])
+        .filter((vp: any) => vp.vente_id === v.id)
+        .map((vp: any) => ({
+          ...vp,
+          produits: (produits || []).find((p: any) => p.id === vp.produit_id) || null,
+        })),
+      paiements: (paiements || []).filter((p: any) => p.vente_id === v.id),
+    }));
+
+    setVentes(ventesAssemblees);
     setChargement(false);
   };
 
@@ -92,11 +129,12 @@ export default function AdminRapports() {
       });
     });
 
+    const total = Object.values(paiementsMap).reduce((a: any, b: any) => a + b, 0) as number;
     const data = [
       { 'Mode de Paiement': 'Cash', 'Total (FCFA)': paiementsMap.cash },
       { 'Mode de Paiement': 'Mobile Money', 'Total (FCFA)': paiementsMap.mobile_money },
       { 'Mode de Paiement': 'Orange Money', 'Total (FCFA)': paiementsMap.orange_money },
-      { 'Mode de Paiement': 'TOTAL', 'Total (FCFA)': Object.values(paiementsMap).reduce((a: any, b: any) => a + b, 0) },
+      { 'Mode de Paiement': 'TOTAL', 'Total (FCFA)': total },
     ];
 
     const wb = XLSX.utils.book_new();
@@ -138,72 +176,82 @@ export default function AdminRapports() {
           </div>
         </div>
 
-        <h2 className="text-xl font-bold text-amber-800 mb-4">Exporter les rapports</h2>
+        {chargement ? (
+          <div className="text-center py-8 text-amber-600">Chargement des donnees...</div>
+        ) : ventes.length === 0 ? (
+          <div className="bg-white rounded-2xl p-8 text-center shadow">
+            <FaFileExcel size={48} className="text-amber-300 mx-auto mb-4" />
+            <p className="text-gray-500">Aucune vente a exporter pour le moment.</p>
+          </div>
+        ) : (
+          <>
+            <h2 className="text-xl font-bold text-amber-800 mb-4">
+              Exporter les rapports ({ventes.length} vente{ventes.length > 1 ? 's' : ''})
+            </h2>
 
-        <div className="space-y-4">
-          <div className="bg-white rounded-2xl shadow border border-amber-100 p-5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="bg-green-100 p-3 rounded-xl">
-                  <FaFileExcel size={24} className="text-green-600" />
-                </div>
-                <div>
-                  <p className="font-bold text-amber-800">Rapport par Vendeuse</p>
-                  <p className="text-sm text-gray-500">Ventes de chaque vendeuse avec details</p>
+            <div className="space-y-4">
+              <div className="bg-white rounded-2xl shadow border border-amber-100 p-5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-green-100 p-3 rounded-xl">
+                      <FaFileExcel size={24} className="text-green-600" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-amber-800">Rapport par Vendeuse</p>
+                      <p className="text-sm text-gray-500">Ventes de chaque vendeuse avec details</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={exporterParVendeuse}
+                    className="flex items-center gap-2 bg-green-500 text-white px-4 py-2 rounded-xl hover:bg-green-600 font-semibold text-sm">
+                    <FaDownload size={14} />
+                    Telecharger
+                  </button>
                 </div>
               </div>
-              <button
-                onClick={exporterParVendeuse}
-                disabled={chargement || ventes.length === 0}
-                className="flex items-center gap-2 bg-green-500 text-white px-4 py-2 rounded-xl hover:bg-green-600 disabled:opacity-50 font-semibold text-sm">
-                <FaDownload size={14} />
-                Telecharger
-              </button>
-            </div>
-          </div>
 
-          <div className="bg-white rounded-2xl shadow border border-amber-100 p-5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="bg-blue-100 p-3 rounded-xl">
-                  <FaFileExcel size={24} className="text-blue-600" />
-                </div>
-                <div>
-                  <p className="font-bold text-amber-800">Rapport par Produit</p>
-                  <p className="text-sm text-gray-500">Quantites vendues et total par produit</p>
+              <div className="bg-white rounded-2xl shadow border border-amber-100 p-5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-blue-100 p-3 rounded-xl">
+                      <FaFileExcel size={24} className="text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-amber-800">Rapport par Produit</p>
+                      <p className="text-sm text-gray-500">Quantites vendues et total par produit</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={exporterParProduit}
+                    className="flex items-center gap-2 bg-blue-500 text-white px-4 py-2 rounded-xl hover:bg-blue-600 font-semibold text-sm">
+                    <FaDownload size={14} />
+                    Telecharger
+                  </button>
                 </div>
               </div>
-              <button
-                onClick={exporterParProduit}
-                disabled={chargement || ventes.length === 0}
-                className="flex items-center gap-2 bg-blue-500 text-white px-4 py-2 rounded-xl hover:bg-blue-600 disabled:opacity-50 font-semibold text-sm">
-                <FaDownload size={14} />
-                Telecharger
-              </button>
-            </div>
-          </div>
 
-          <div className="bg-white rounded-2xl shadow border border-amber-100 p-5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="bg-amber-100 p-3 rounded-xl">
-                  <FaFileExcel size={24} className="text-amber-600" />
-                </div>
-                <div>
-                  <p className="font-bold text-amber-800">Rapport par Paiement</p>
-                  <p className="text-sm text-gray-500">Total encaisse par mode de paiement</p>
+              <div className="bg-white rounded-2xl shadow border border-amber-100 p-5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-amber-100 p-3 rounded-xl">
+                      <FaFileExcel size={24} className="text-amber-600" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-amber-800">Rapport par Paiement</p>
+                      <p className="text-sm text-gray-500">Total encaisse par mode de paiement</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={exporterParPaiement}
+                    className="flex items-center gap-2 bg-amber-500 text-white px-4 py-2 rounded-xl hover:bg-amber-600 font-semibold text-sm">
+                    <FaDownload size={14} />
+                    Telecharger
+                  </button>
                 </div>
               </div>
-              <button
-                onClick={exporterParPaiement}
-                disabled={chargement || ventes.length === 0}
-                className="flex items-center gap-2 bg-amber-500 text-white px-4 py-2 rounded-xl hover:bg-amber-600 disabled:opacity-50 font-semibold text-sm">
-                <FaDownload size={14} />
-                Telecharger
-              </button>
             </div>
-          </div>
-        </div>
+          </>
+        )}
       </div>
     </div>
   );
