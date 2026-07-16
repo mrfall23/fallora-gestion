@@ -2,7 +2,9 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
-type Vendeuse = { id: number; nom: string; email: string; mot_de_passe: string; actif: boolean; role: string };
+// Plus de mot_de_passe : les mots de passe vivent dans auth.users, haches
+// par Supabase. L'app ne peut plus les lire, et c'est le but.
+type Vendeuse = { id: number; nom: string; email: string; actif: boolean; role: string };
 const FORM_VIDE = { nom: '', email: '', mot_de_passe: '' };
 
 const inputStyle: React.CSSProperties = {
@@ -26,7 +28,7 @@ export default function AdminParametres() {
   const chargerVendeuses = async () => {
     const { data } = await supabase
       .from('utilisateurs')
-      .select('*')
+      .select('id, nom, email, actif, role')
       .eq('role', 'vendeuse')
       .order('nom');
     setVendeuses(data || []);
@@ -34,30 +36,52 @@ export default function AdminParametres() {
   };
 
   const ouvrirAjout = () => { setForm(FORM_VIDE); setEditee(null); setFormOuvert(true); setErreur(''); };
-  const ouvrirEdit = (v: Vendeuse) => { setForm({ nom: v.nom, email: v.email, mot_de_passe: v.mot_de_passe }); setEditee(v); setFormOuvert(true); setErreur(''); };
+  // Le mot de passe part vide en edition : il n'est plus lisible, et le
+  // laisser vide signifie « ne pas le changer ».
+  const ouvrirEdit = (v: Vendeuse) => { setForm({ nom: v.nom, email: v.email, mot_de_passe: '' }); setEditee(v); setFormOuvert(true); setErreur(''); };
   const fermer = () => { setFormOuvert(false); setEditee(null); setErreur(''); };
 
   const afficherMessage = (msg: string) => { setMessage(msg); setTimeout(() => setMessage(''), 3000); };
 
+  // Creer un compte exige la cle secrete, qui ne doit jamais atteindre le
+  // navigateur : tout passe par /api/vendeuses, qui verifie cote serveur que
+  // l'appelant est bien admin. Le controle d'unicite de l'email est laisse a
+  // la contrainte UNIQUE en base — un pre-check ici laisserait une fenetre
+  // entre la verification et l'insertion.
   const sauvegarder = async () => {
-    if (!form.nom.trim() || !form.email.trim() || !form.mot_de_passe.trim()) {
-      setErreur('Tous les champs sont obligatoires.'); return;
+    if (!form.nom.trim() || !form.email.trim()) {
+      setErreur('Le nom et l\'email sont obligatoires.'); return;
     }
+    if (!editee && !form.mot_de_passe.trim()) {
+      setErreur('Le mot de passe est obligatoire.'); return;
+    }
+    if (form.mot_de_passe && form.mot_de_passe.length < 6) {
+      setErreur('Le mot de passe doit faire au moins 6 caractères.'); return;
+    }
+
     setSauvegarde(true); setErreur('');
-    if (editee) {
-      const { error } = await supabase.from('utilisateurs').update({ nom: form.nom.trim(), email: form.email.trim().toLowerCase(), mot_de_passe: form.mot_de_passe }).eq('id', editee.id);
-      if (error) { setErreur('Erreur lors de la modification.'); setSauvegarde(false); return; }
-      afficherMessage('Compte mis à jour avec succès.');
-    } else {
-      // Vérifier si l'email existe déjà
-      const { data: existe } = await supabase.from('utilisateurs').select('id').eq('email', form.email.trim().toLowerCase()).maybeSingle();
-      if (existe) { setErreur('Cet email est déjà utilisé.'); setSauvegarde(false); return; }
-      const { error } = await supabase.from('utilisateurs').insert({ nom: form.nom.trim(), email: form.email.trim().toLowerCase(), mot_de_passe: form.mot_de_passe, role: 'vendeuse', actif: true });
-      if (error) { setErreur('Erreur lors de la création du compte.'); setSauvegarde(false); return; }
-      afficherMessage('Compte vendeuse créé avec succès.');
-    }
-    await chargerVendeuses();
+
+    const reponse = await fetch('/api/vendeuses', {
+      method: editee ? 'PATCH' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...(editee ? { id: editee.id } : {}),
+        nom: form.nom,
+        email: form.email,
+        motDePasse: form.mot_de_passe || undefined,
+      }),
+    });
+
+    const resultat = await reponse.json().catch(() => ({}));
     setSauvegarde(false);
+
+    if (!reponse.ok) {
+      setErreur(resultat.message || 'Une erreur est survenue.');
+      return;
+    }
+
+    afficherMessage(editee ? 'Compte mis à jour avec succès.' : 'Compte vendeuse créé avec succès.');
+    await chargerVendeuses();
     fermer();
   };
 
@@ -121,8 +145,10 @@ export default function AdminParametres() {
               <input style={inputStyle} type="email" placeholder="vendeuse@fallora.com" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
             </div>
             <div>
-              <div style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(245,245,240,.45)', letterSpacing: '.5px', marginBottom: '6px' }}>MOT DE PASSE *</div>
-              <input style={inputStyle} type="text" placeholder="Mot de passe" value={form.mot_de_passe} onChange={e => setForm({ ...form, mot_de_passe: e.target.value })} />
+              <div style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(245,245,240,.45)', letterSpacing: '.5px', marginBottom: '6px' }}>
+                {editee ? 'NOUVEAU MOT DE PASSE' : 'MOT DE PASSE *'}
+              </div>
+              <input style={inputStyle} type="password" placeholder={editee ? 'Laisser vide pour ne pas changer' : '6 caractères minimum'} value={form.mot_de_passe} onChange={e => setForm({ ...form, mot_de_passe: e.target.value })} />
             </div>
           </div>
           {erreur && (

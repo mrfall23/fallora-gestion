@@ -14,19 +14,44 @@ export default function LoginPage() {
     if (!email || !motDePasse) { setErreur('Veuillez remplir tous les champs.'); return; }
     setErreur('');
     setChargement(true);
-    const { data, error } = await supabase
+
+    // Supabase compare le mot de passe cote serveur, contre un hash.
+    // Le mot de passe ne transite plus en clair et aucune ligne de la table
+    // utilisateurs n'est renvoyee avant authentification.
+    const { data: auth, error: erreurAuth } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password: motDePasse,
+    });
+
+    if (erreurAuth || !auth.user) {
+      setChargement(false);
+      setErreur('Email ou mot de passe incorrect.');
+      return;
+    }
+
+    const { data: profil } = await supabase
       .from('utilisateurs')
-      .select('*')
-      .eq('email', email.trim())
-      .eq('actif', true)
+      .select('role, actif')
+      .eq('auth_id', auth.user.id)
       .single();
+
     setChargement(false);
-    if (error || !data) { setErreur('Email ou mot de passe incorrect.'); return; }
-    if (data.mot_de_passe !== motDePasse) { setErreur('Email ou mot de passe incorrect.'); return; }
-    localStorage.setItem('fallora_user', JSON.stringify({ id: data.id, nom: data.nom, email: data.email, role: data.role }));
-    document.cookie = `fallora_role=${data.role}; path=/; max-age=86400; SameSite=Strict`;
-    if (data.role === 'admin') router.push('/admin');
-    else router.push('/vendeuse');
+
+    if (!profil) {
+      await supabase.auth.signOut();
+      setErreur('Compte introuvable. Contactez un administrateur.');
+      return;
+    }
+
+    if (!profil.actif) {
+      await supabase.auth.signOut();
+      setErreur('Ce compte a ete desactive.');
+      return;
+    }
+
+    // La session vit desormais dans un cookie signe par Supabase, lisible
+    // par le serveur. Plus de localStorage ni de cookie de role forgeable.
+    router.replace(profil.role === 'admin' ? '/admin' : '/vendeuse');
   };
 
   return (

@@ -1,6 +1,12 @@
-import { createClient } from '@supabase/supabase-js';
+import { createBrowserClient } from '@supabase/ssr';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
-
-export const supabase = createClient(supabaseUrl, supabaseKey);
+// Client navigateur. createBrowserClient stocke la session dans un COOKIE,
+// la ou l'ancien createClient utilisait le localStorage — invisible cote
+// serveur, ce qui empechait proxy.ts de voir la session.
+//
+// Toutes les pages 'use client' importent ce singleton : l'API reste la
+// meme, seul le stockage de session change.
+export const supabase = createBrowserClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL as string,
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY as string
+);
