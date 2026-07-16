@@ -1,6 +1,6 @@
 'use client';
-import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { useUtilisateur, seDeconnecter } from '@/lib/utilisateur';
 
 const NAV = [
   { href: '/admin', icon: 'dashboard', label: 'Tableau de bord' },
@@ -23,23 +23,14 @@ const TITRES: Record<string, [string, string]> = {
 };
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<any>(null);
+  // useUtilisateur('admin') verifie la session Supabase et renvoie ailleurs
+  // toute personne qui n'est pas admin. L'ancien controle lisait un role
+  // dans le localStorage, modifiable depuis la console du navigateur.
+  const { utilisateur: user } = useUtilisateur('admin');
   const router = useRouter();
   const pathname = usePathname();
 
-  useEffect(() => {
-    const userData = localStorage.getItem('fallora_user');
-    if (!userData) { router.push('/'); return; }
-    const parsed = JSON.parse(userData);
-    if (parsed.role !== 'admin') { router.push('/'); return; }
-    setUser(parsed);
-  }, []);
-
-  const deconnecter = () => {
-    localStorage.removeItem('fallora_user');
-    document.cookie = 'fallora_role=; path=/; max-age=0';
-    router.push('/');
-  };
+  const deconnecter = seDeconnecter;
 
   if (!user) return <div style={{ minHeight: '100vh', background: '#0A0A0A' }} />;
 

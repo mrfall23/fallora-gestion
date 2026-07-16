@@ -2,11 +2,12 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { useUtilisateur, seDeconnecter } from '@/lib/utilisateur';
 
 const inputStyle: React.CSSProperties = { height: '44px', padding: '0 14px', borderRadius: '12px', background: 'rgba(0,0,0,.3)', border: '1px solid rgba(255,255,255,.08)', outline: 'none', color: '#F5F5F0', fontSize: '14px', width: '100%' };
 
 export default function VendeusePage() {
-  const [user, setUser] = useState<any>(null);
+  const { utilisateur: user } = useUtilisateur();
   const [produits, setProduits] = useState<any[]>([]);
   const [panier, setPanier] = useState<any[]>([]);
   const [cliente, setCliente] = useState({ nom: '', telephone: '' });
@@ -19,12 +20,8 @@ export default function VendeusePage() {
   const [erreur, setErreur] = useState('');
   const router = useRouter();
 
-  useEffect(() => {
-    const userData = localStorage.getItem('fallora_user');
-    if (!userData) { router.push('/'); return; }
-    setUser(JSON.parse(userData));
-    chargerProduits();
-  }, []);
+  // La redirection si non connecte est prise en charge par useUtilisateur().
+  useEffect(() => { chargerProduits(); }, []);
 
   const chargerProduits = async () => {
     const { data } = await supabase.from('produits').select('*').order('nom');
@@ -57,36 +54,34 @@ export default function VendeusePage() {
   const resteAPayer = Math.max(0, total - montantEffectif);
   const nbArticles = panier.reduce((s, p) => s + p.quantite, 0);
 
+  // Toute la vente part en un seul appel a enregistrer_vente(), executee en
+  // une transaction cote base. Avant, c'etaient 5 inserts separes depuis le
+  // navigateur : un echec en cours de route laissait une vente sans produits.
+  //
+  // On n'envoie ni les prix ni le total : la base les lit et les calcule
+  // elle-meme. Ce que le navigateur affirme n'engage plus rien.
   const enregistrerVente = async () => {
     if (panier.length === 0) { setErreur('Ajoutez des produits au panier.'); return; }
     if (!cliente.nom.trim()) { setErreur('Entrez le nom de la cliente.'); return; }
     if (statutPaiement === 'partiel' && (!montantPaye || montantPayeNum <= 0)) { setErreur('Entrez le montant payé.'); return; }
     setErreur(''); setEnregistrement(true);
     try {
-      let clienteId: number;
-      if (cliente.telephone.trim()) {
-        const { data: ex } = await supabase.from('clientes').select('id').eq('telephone', cliente.telephone.trim()).maybeSingle();
-        if (ex) { clienteId = ex.id; }
-        else {
-          const { data: nv, error: e } = await supabase.from('clientes').insert({ nom: cliente.nom.trim(), telephone: cliente.telephone.trim() }).select().single();
-          if (e || !nv) { setErreur('Erreur création cliente.'); return; }
-          clienteId = nv.id;
-        }
-      } else {
-        const { data: nv, error: e } = await supabase.from('clientes').insert({ nom: cliente.nom.trim(), telephone: null }).select().single();
-        if (e || !nv) { setErreur('Erreur création cliente.'); return; }
-        clienteId = nv.id;
+      const { error } = await supabase.rpc('enregistrer_vente', {
+        p_cliente_nom: cliente.nom,
+        p_cliente_telephone: cliente.telephone || null,
+        p_produits: panier.map(p => ({ produit_id: p.id, quantite: p.quantite })),
+        p_statut_paiement: statutPaiement,
+        p_montant_paye: statutPaiement === 'paye' ? null : montantPayeNum,
+        p_mode_paiement: modePaiement,
+      });
+
+      if (error) {
+        // La fonction remonte des messages metier utiles : stock insuffisant,
+        // produit inactif, montant invalide.
+        setErreur(error.message || 'Erreur lors de l\'enregistrement.');
+        return;
       }
-      const montantFinal = statutPaiement === 'paye' ? total : montantPayeNum;
-      const { data: vente, error: ev } = await supabase.from('ventes').insert({ vendeuse_id: user.id, cliente_id: clienteId, total, montant_paye: montantFinal, reste_a_payer: Math.max(0, total - montantFinal), statut_paiement: statutPaiement, annulee: false }).select().single();
-      if (ev || !vente) { setErreur('Erreur création vente.'); return; }
-      const { error: ep } = await supabase.from('vente_produits').insert(panier.map(p => ({ vente_id: vente.id, produit_id: p.id, quantite: p.quantite, prix_unitaire: p.prix })));
-      if (ep) { setErreur('Erreur enregistrement produits.'); return; }
-      await supabase.from('paiements').insert({ vente_id: vente.id, montant: montantFinal, mode: modePaiement });
-      for (const p of panier) {
-        const reel = produits.find(pr => pr.id === p.id);
-        if (reel) await supabase.from('produits').update({ stock_restant: Math.max(0, reel.stock_restant - p.quantite) }).eq('id', p.id);
-      }
+
       setSucces('Vente enregistrée avec succès !');
       setPanier([]); setCliente({ nom: '', telephone: '' }); setMontantPaye(''); setStatutPaiement('paye'); setModePaiement('cash');
       await chargerProduits();
@@ -117,7 +112,7 @@ export default function VendeusePage() {
               <span style={{ fontSize: '13.5px', fontWeight: 600, color: '#F5F5F0' }}>{user.nom}</span>
             </div>
           )}
-          <button onClick={() => { localStorage.removeItem('fallora_user'); document.cookie = 'fallora_role=; path=/; max-age=0'; router.push('/'); }} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,.1)', borderRadius: '10px', padding: '8px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', color: 'rgba(245,245,240,.6)', fontSize: '13px' }}>
+          <button onClick={seDeconnecter} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,.1)', borderRadius: '10px', padding: '8px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', color: 'rgba(245,245,240,.6)', fontSize: '13px' }}>
             <span className="ms" style={{ fontSize: '18px' }}>logout</span>
           </button>
         </div>
