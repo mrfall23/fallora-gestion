@@ -1,11 +1,12 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useIsMobile } from '../../components/useMediaQuery';
 
 type Cliente = { id: number; nom: string; telephone: string | null; created_at: string; nbVentes: number; totalDepense: number; resteAPayer: number; derniereVisite: string | null };
 
-const BADGE_PAID = { fontSize: '12px', fontWeight: 700, color: '#5BBF89', background: 'rgba(91,191,137,.13)', border: '1px solid rgba(91,191,137,.25)', padding: '4px 10px', borderRadius: '20px' } as const;
-const BADGE_PART = { fontSize: '12px', fontWeight: 700, color: '#F0C040', background: 'rgba(240,192,64,.13)', border: '1px solid rgba(240,192,64,.28)', padding: '4px 10px', borderRadius: '20px' } as const;
+const BADGE_PAID = { fontSize: '12px', fontWeight: 700, color: 'var(--success)', background: 'var(--success-tint)', border: '1px solid var(--success-line)', padding: '4px 10px', borderRadius: '20px' } as const;
+const BADGE_PART = { fontSize: '12px', fontWeight: 700, color: 'var(--warn)', background: 'var(--warn-tint)', border: '1px solid var(--warn-line)', padding: '4px 10px', borderRadius: '20px' } as const;
 
 export default function AdminClients() {
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -14,6 +15,7 @@ export default function AdminClients() {
   const [clienteSelectee, setClienteSelectee] = useState<Cliente | null>(null);
   const [ventesCliente, setVentesCliente] = useState<any[]>([]);
   const [chargementDetail, setChargementDetail] = useState(false);
+  const isMobile = useIsMobile();
 
   useEffect(() => { chargerClientes(); }, []);
 
@@ -52,18 +54,18 @@ export default function AdminClients() {
   return (
     <div className="fade-up">
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '16px', marginBottom: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: '16px', marginBottom: '20px' }}>
         {[
-          { icon: 'people', label: 'Clientes', value: clientes.length.toString(), color: '#F5F5F0' },
-          { icon: 'payments', label: 'CA Total FCFA', value: totalCA.toLocaleString(), color: '#5BBF89' },
-          { icon: 'pending_actions', label: 'En attente FCFA', value: totalAttente.toLocaleString(), color: '#F0C040' },
+          { icon: 'people', label: 'Clientes', value: clientes.length.toString(), color: 'var(--ink)' },
+          { icon: 'payments', label: 'CA Total FCFA', value: totalCA.toLocaleString(), color: 'var(--success)' },
+          { icon: 'pending_actions', label: 'En attente FCFA', value: totalAttente.toLocaleString(), color: 'var(--warn)' },
         ].map(s => (
-          <div key={s.label} style={{ padding: '20px', borderRadius: '18px', background: 'rgba(255,255,255,.035)', border: '1px solid rgba(212,175,55,.12)', display: 'flex', alignItems: 'center', gap: '14px' }}>
-            <div style={{ width: '44px', height: '44px', borderRadius: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg,rgba(240,192,64,.18),rgba(212,175,55,.06))', border: '1px solid rgba(212,175,55,.2)', flexShrink: 0 }}>
-              <span className="ms" style={{ fontSize: '22px', color: '#F0C040' }}>{s.icon}</span>
+          <div key={s.label} style={{ padding: '20px', borderRadius: '18px', background: 'var(--surface)', border: '1px solid var(--accent-12)', display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <div style={{ width: '44px', height: '44px', borderRadius: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--accent-12)', border: '1px solid var(--accent-20)', flexShrink: 0 }}>
+              <span className="ms" style={{ fontSize: '22px', color: 'var(--accent)' }}>{s.icon}</span>
             </div>
             <div>
-              <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '.4px', color: 'rgba(245,245,240,.5)', textTransform: 'uppercase' as const }}>{s.label}</div>
+              <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '.4px', color: 'var(--ink-55)', textTransform: 'uppercase' as const }}>{s.label}</div>
               <div style={{ fontSize: '20px', fontWeight: 800, color: s.color }}>{s.value}</div>
             </div>
           </div>
@@ -71,50 +73,50 @@ export default function AdminClients() {
       </div>
 
       {/* Recherche */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', height: '48px', padding: '0 16px', borderRadius: '14px', background: 'rgba(0,0,0,.3)', border: '1px solid rgba(255,255,255,.08)', marginBottom: '16px' }}>
-        <span className="ms" style={{ fontSize: '20px', color: 'rgba(245,245,240,.4)' }}>search</span>
-        <input value={recherche} onChange={e => setRecherche(e.target.value)} placeholder="Rechercher par nom ou téléphone..." style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: '#F5F5F0', fontSize: '14px' }} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', height: '48px', padding: '0 16px', borderRadius: '14px', background: 'var(--surface-inset)', border: '1px solid var(--line)', marginBottom: '16px' }}>
+        <span className="ms" style={{ fontSize: '20px', color: 'var(--ink-45)' }}>search</span>
+        <input value={recherche} onChange={e => setRecherche(e.target.value)} placeholder="Rechercher par nom ou téléphone..." aria-label="Rechercher une cliente" style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--ink)', fontSize: '14px' }} />
       </div>
 
       {/* 2-col layout */}
-      <div style={{ display: 'grid', gridTemplateColumns: clienteSelectee ? '1fr 380px' : '1fr', gap: '16px', alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: clienteSelectee && !isMobile ? '1fr 380px' : '1fr', gap: '16px', alignItems: 'start' }}>
         {/* Liste */}
         <div>
           {chargement ? (
-            <div style={{ textAlign: 'center', padding: '60px', color: 'rgba(245,245,240,.4)' }}>Chargement...</div>
+            <div style={{ textAlign: 'center', padding: '60px', color: 'var(--ink-45)' }}>Chargement...</div>
           ) : filtrees.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '60px', color: 'rgba(245,245,240,.4)' }}>
-              <span className="ms" style={{ fontSize: '48px', display: 'block', marginBottom: '12px', color: 'rgba(212,175,55,.3)' }}>people</span>
+            <div style={{ textAlign: 'center', padding: '60px', color: 'var(--ink-45)' }}>
+              <span className="ms" style={{ fontSize: '48px', display: 'block', marginBottom: '12px', color: 'var(--accent-30)' }}>people</span>
               {recherche ? 'Aucune cliente trouvée.' : 'Aucune cliente enregistrée.'}
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {filtrees.map(c => (
-                <button key={c.id} onClick={() => voirDetail(c)} style={{ width: '100%', padding: '16px 20px', borderRadius: '18px', background: clienteSelectee?.id === c.id ? 'rgba(212,175,55,.08)' : 'rgba(255,255,255,.035)', border: `1px solid ${clienteSelectee?.id === c.id ? 'rgba(212,175,55,.35)' : 'rgba(255,255,255,.06)'}`, backdropFilter: 'blur(20px)', cursor: 'pointer', textAlign: 'left', transition: 'all .15s' }}>
+                <button key={c.id} onClick={() => voirDetail(c)} style={{ width: '100%', padding: '16px 20px', borderRadius: '18px', background: clienteSelectee?.id === c.id ? 'var(--accent-08)' : 'var(--surface)', border: `1px solid ${clienteSelectee?.id === c.id ? 'var(--accent-30)' : 'var(--line)'}`, backdropFilter: 'blur(20px)', cursor: 'pointer', textAlign: 'left', transition: 'all .15s' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                      <div style={{ width: '42px', height: '42px', borderRadius: '13px', background: 'linear-gradient(135deg,#262420,#191815)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(212,175,55,.2)', flexShrink: 0 }}>
-                        <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '20px', color: '#D4AF37', fontWeight: 600 }}>{c.nom[0].toUpperCase()}</span>
+                      <div style={{ width: '42px', height: '42px', borderRadius: '13px', background: 'var(--avatar)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--accent-20)', flexShrink: 0 }}>
+                        <span style={{ fontFamily: "var(--font-cormorant), serif", fontSize: '20px', color: 'var(--accent)', fontWeight: 600 }}>{c.nom[0].toUpperCase()}</span>
                       </div>
                       <div>
-                        <div style={{ fontSize: '14.5px', fontWeight: 600, color: '#F5F5F0' }}>{c.nom}</div>
+                        <div style={{ fontSize: '14.5px', fontWeight: 600, color: 'var(--ink)' }}>{c.nom}</div>
                         {c.telephone ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: 'rgba(245,245,240,.4)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: 'var(--ink-45)' }}>
                             <span className="ms" style={{ fontSize: '13px' }}>phone</span>{c.telephone}
                           </div>
-                        ) : <div style={{ fontSize: '12px', color: 'rgba(245,245,240,.25)' }}>Pas de téléphone</div>}
+                        ) : <div style={{ fontSize: '12px', color: 'var(--ink-25)' }}>Pas de téléphone</div>}
                       </div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '15px', fontWeight: 700, color: '#F5F5F0' }}>{c.totalDepense.toLocaleString()} <span style={{ fontSize: '11px', color: '#D4AF37' }}>FCFA</span></div>
+                      <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--ink)' }}>{c.totalDepense.toLocaleString()} <span style={{ fontSize: '11px', color: 'var(--accent)' }}>FCFA</span></div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'flex-end', marginTop: '4px' }}>
-                        <span style={{ fontSize: '11.5px', background: 'rgba(212,175,55,.12)', color: '#D4AF37', padding: '3px 9px', borderRadius: '20px', fontWeight: 600 }}>{c.nbVentes} achat{c.nbVentes > 1 ? 's' : ''}</span>
-                        {c.resteAPayer > 0 && <span style={{ fontSize: '11.5px', background: 'rgba(240,192,64,.13)', color: '#F0C040', padding: '3px 9px', borderRadius: '20px', fontWeight: 600 }}>-{c.resteAPayer.toLocaleString()}</span>}
+                        <span style={{ fontSize: '11.5px', background: 'var(--accent-12)', color: 'var(--accent-deep)', padding: '3px 9px', borderRadius: '20px', fontWeight: 600 }}>{c.nbVentes} achat{c.nbVentes > 1 ? 's' : ''}</span>
+                        {c.resteAPayer > 0 && <span style={{ fontSize: '11.5px', background: 'var(--warn-tint)', color: 'var(--warn)', padding: '3px 9px', borderRadius: '20px', fontWeight: 600 }}>-{c.resteAPayer.toLocaleString()}</span>}
                       </div>
                     </div>
                   </div>
                   {c.derniereVisite && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '8px', fontSize: '11.5px', color: 'rgba(245,245,240,.35)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '8px', fontSize: '11.5px', color: 'var(--ink-35)' }}>
                       <span className="ms" style={{ fontSize: '13px' }}>schedule</span>
                       Dernière visite : {new Date(c.derniereVisite).toLocaleDateString('fr-FR')}
                     </div>
@@ -127,19 +129,19 @@ export default function AdminClients() {
 
         {/* Detail */}
         {clienteSelectee && (
-          <div style={{ position: 'sticky', top: '100px', borderRadius: '20px', background: 'rgba(255,255,255,.04)', border: '1px solid rgba(212,175,55,.2)', backdropFilter: 'blur(22px)', boxShadow: '0 12px 40px rgba(0,0,0,.35)', overflow: 'hidden' }}>
-            <div style={{ background: 'linear-gradient(135deg,rgba(212,175,55,.15),rgba(212,175,55,.05))', padding: '20px', borderBottom: '1px solid rgba(212,175,55,.12)' }}>
+          <div style={{ position: isMobile ? 'static' : 'sticky', top: '100px', borderRadius: '20px', background: 'var(--surface-2)', border: '1px solid var(--accent-20)', backdropFilter: 'blur(22px)', boxShadow: 'var(--shadow-lg)', overflow: 'hidden' }}>
+            <div style={{ background: 'linear-gradient(135deg,var(--accent-16),var(--accent-08))', padding: '20px', borderBottom: '1px solid var(--accent-12)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '16px' }}>
-                <div style={{ width: '50px', height: '50px', borderRadius: '15px', background: 'linear-gradient(135deg,#2e271c,#1a1a18)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(212,175,55,.3)' }}>
-                  <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '26px', color: '#D4AF37', fontWeight: 600 }}>{clienteSelectee.nom[0].toUpperCase()}</span>
+                <div style={{ width: '50px', height: '50px', borderRadius: '15px', background: 'var(--avatar)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--accent-30)' }}>
+                  <span style={{ fontFamily: "var(--font-cormorant), serif", fontSize: '26px', color: 'var(--accent)', fontWeight: 600 }}>{clienteSelectee.nom[0].toUpperCase()}</span>
                 </div>
                 <div>
-                  <div style={{ fontSize: '17px', fontWeight: 700, color: '#F5F5F0' }}>{clienteSelectee.nom}</div>
+                  <div style={{ fontSize: '17px', fontWeight: 700, color: 'var(--ink)' }}>{clienteSelectee.nom}</div>
                   {clienteSelectee.telephone ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '13px', color: '#D4AF37' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '13px', color: 'var(--accent)' }}>
                       <span className="ms" style={{ fontSize: '14px' }}>phone</span>{clienteSelectee.telephone}
                     </div>
-                  ) : <div style={{ fontSize: '12px', color: 'rgba(245,245,240,.35)' }}>Pas de téléphone</div>}
+                  ) : <div style={{ fontSize: '12px', color: 'var(--ink-35)' }}>Pas de téléphone</div>}
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '8px' }}>
@@ -148,41 +150,41 @@ export default function AdminClients() {
                   { label: 'Total FCFA', value: clienteSelectee.totalDepense.toLocaleString() },
                   { label: 'Reste', value: clienteSelectee.resteAPayer.toLocaleString(), warn: clienteSelectee.resteAPayer > 0 },
                 ].map(s => (
-                  <div key={s.label} style={{ background: 'rgba(0,0,0,.2)', borderRadius: '12px', padding: '10px', textAlign: 'center', border: `1px solid ${s.warn ? 'rgba(240,192,64,.3)' : 'rgba(255,255,255,.06)'}` }}>
-                    <div style={{ fontSize: '16px', fontWeight: 800, color: s.warn ? '#F0C040' : '#F5F5F0' }}>{s.value}</div>
-                    <div style={{ fontSize: '10px', color: 'rgba(245,245,240,.45)', fontWeight: 600, letterSpacing: '.3px', textTransform: 'uppercase' as const }}>{s.label}</div>
+                  <div key={s.label} style={{ background: 'var(--surface)', borderRadius: '12px', padding: '10px', textAlign: 'center', border: `1px solid ${s.warn ? 'var(--warn-line)' : 'var(--line)'}` }}>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: s.warn ? 'var(--warn)' : 'var(--ink)' }}>{s.value}</div>
+                    <div style={{ fontSize: '10px', color: 'var(--ink-45)', fontWeight: 600, letterSpacing: '.3px', textTransform: 'uppercase' as const }}>{s.label}</div>
                   </div>
                 ))}
               </div>
             </div>
             <div style={{ padding: '16px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', fontSize: '13px', fontWeight: 700, color: '#F5F5F0' }}>
-                <span className="ms" style={{ fontSize: '18px', color: '#F0C040' }}>shopping_bag</span>Historique
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', fontSize: '13px', fontWeight: 700, color: 'var(--ink)' }}>
+                <span className="ms" style={{ fontSize: '18px', color: 'var(--accent)' }}>shopping_bag</span>Historique
               </div>
               {chargementDetail ? (
-                <div style={{ textAlign: 'center', padding: '20px', color: 'rgba(245,245,240,.4)', fontSize: '13px' }}>Chargement...</div>
+                <div style={{ textAlign: 'center', padding: '20px', color: 'var(--ink-45)', fontSize: '13px' }}>Chargement...</div>
               ) : ventesCliente.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '20px', color: 'rgba(245,245,240,.4)', fontSize: '13px' }}>Aucun achat.</div>
+                <div style={{ textAlign: 'center', padding: '20px', color: 'var(--ink-45)', fontSize: '13px' }}>Aucun achat.</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '380px', overflowY: 'auto', paddingRight: '4px' }}>
                   {ventesCliente.map(v => (
-                    <div key={v.id} style={{ padding: '12px 14px', borderRadius: '14px', background: 'rgba(255,255,255,.03)', border: '1px solid rgba(255,255,255,.06)' }}>
+                    <div key={v.id} style={{ padding: '12px 14px', borderRadius: '14px', background: 'var(--surface)', border: '1px solid var(--line)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
                         <div>
-                          <div style={{ fontSize: '12px', color: 'rgba(245,245,240,.4)' }}>{new Date(v.date_vente).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
-                          <div style={{ fontSize: '11.5px', color: 'rgba(245,245,240,.35)' }}>par {v.utilisateurs?.nom || 'Inconnue'}</div>
+                          <div style={{ fontSize: '12px', color: 'var(--ink-45)' }}>{new Date(v.date_vente).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+                          <div style={{ fontSize: '11.5px', color: 'var(--ink-35)' }}>par {v.utilisateurs?.nom || 'Inconnue'}</div>
                         </div>
                         <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: '14px', fontWeight: 700, color: '#F5F5F0' }}>{v.total?.toLocaleString()} <span style={{ fontSize: '10px', color: '#D4AF37' }}>FCFA</span></div>
+                          <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--ink)' }}>{v.total?.toLocaleString()} <span style={{ fontSize: '10px', color: 'var(--accent)' }}>FCFA</span></div>
                           <span style={v.statut_paiement === 'paye' ? BADGE_PAID : BADGE_PART}>{v.statut_paiement === 'paye' ? 'Payé' : `Reste : ${v.reste_a_payer?.toLocaleString()}`}</span>
                         </div>
                       </div>
                       {v.vente_produits?.length > 0 && (
-                        <div style={{ borderTop: '1px solid rgba(255,255,255,.05)', paddingTop: '6px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <div style={{ borderTop: '1px solid var(--line-soft)', paddingTop: '6px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
                           {v.vente_produits.map((vp: any, i: number) => (
                             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                              <span style={{ color: 'rgba(245,245,240,.6)' }}>{vp.produits?.nom || 'Inconnu'} <span style={{ color: '#D4AF37', fontWeight: 700 }}>x{vp.quantite}</span></span>
-                              <span style={{ color: '#F5F5F0', fontWeight: 600 }}>{(vp.prix_unitaire * vp.quantite).toLocaleString()}</span>
+                              <span style={{ color: 'var(--ink-70)' }}>{vp.produits?.nom || 'Inconnu'} <span style={{ color: 'var(--accent)', fontWeight: 700 }}>x{vp.quantite}</span></span>
+                              <span style={{ color: 'var(--ink)', fontWeight: 600 }}>{(vp.prix_unitaire * vp.quantite).toLocaleString()}</span>
                             </div>
                           ))}
                         </div>

@@ -80,40 +80,40 @@ export default function AdminRapports() {
   return (
     <div className="fade-up">
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '16px', marginBottom: '28px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: '16px', marginBottom: '28px' }}>
         {[
-          { label: 'Total ventes', value: totalVentes.toLocaleString(), color: '#F5F5F0' },
-          { label: 'Encaissé', value: totalEncaisse.toLocaleString(), color: '#5BBF89' },
-          { label: 'En attente', value: totalEnAttente.toLocaleString(), color: '#F0C040' },
+          { label: 'Total ventes', value: totalVentes.toLocaleString(), color: 'var(--ink)' },
+          { label: 'Encaissé', value: totalEncaisse.toLocaleString(), color: 'var(--success)' },
+          { label: 'En attente', value: totalEnAttente.toLocaleString(), color: 'var(--warn)' },
         ].map(s => (
-          <div key={s.label} style={{ padding: '20px', borderRadius: '18px', background: 'rgba(255,255,255,.035)', border: '1px solid rgba(212,175,55,.12)', textAlign: 'center' }}>
-            <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '.5px', color: 'rgba(245,245,240,.5)', textTransform: 'uppercase', marginBottom: '8px' }}>{s.label}</div>
-            <div style={{ fontSize: '22px', fontWeight: 800, color: s.color }}>{s.value} <span style={{ fontSize: '12px', color: '#D4AF37', fontWeight: 600 }}>FCFA</span></div>
+          <div key={s.label} style={{ padding: '20px', borderRadius: '18px', background: 'var(--surface)', border: '1px solid var(--accent-12)', textAlign: 'center' }}>
+            <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '.5px', color: 'var(--ink-55)', textTransform: 'uppercase', marginBottom: '8px' }}>{s.label}</div>
+            <div style={{ fontSize: '22px', fontWeight: 800, color: s.color }}>{s.value} <span style={{ fontSize: '12px', color: 'var(--accent)', fontWeight: 600 }}>FCFA</span></div>
           </div>
         ))}
       </div>
 
       {chargement ? (
-        <div style={{ textAlign: 'center', padding: '40px', color: 'rgba(245,245,240,.4)' }}>Chargement...</div>
+        <div style={{ textAlign: 'center', padding: '40px', color: 'var(--ink-45)' }}>Chargement...</div>
       ) : ventes.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '80px', color: 'rgba(245,245,240,.4)' }}>
-          <span className="ms" style={{ fontSize: '48px', display: 'block', marginBottom: '12px', color: 'rgba(212,175,55,.3)' }}>download</span>
+        <div style={{ textAlign: 'center', padding: '80px', color: 'var(--ink-45)' }}>
+          <span className="ms" style={{ fontSize: '48px', display: 'block', marginBottom: '12px', color: 'var(--accent-30)' }}>download</span>
           Aucune vente à exporter.
         </div>
       ) : (
         <>
-          <div style={{ fontSize: '14px', color: 'rgba(245,245,240,.5)', marginBottom: '16px', fontWeight: 500 }}>
+          <div style={{ fontSize: '14px', color: 'var(--ink-55)', marginBottom: '16px', fontWeight: 500 }}>
             {ventes.length} vente{ventes.length > 1 ? 's' : ''} disponibles à l'export
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: '20px' }}>
             {CARDS.map(r => (
-              <div key={r.title} style={{ display: 'flex', flexDirection: 'column', padding: '28px', borderRadius: '22px', background: 'rgba(255,255,255,.035)', border: '1px solid rgba(212,175,55,.12)', backdropFilter: 'blur(20px)', boxShadow: '0 8px 30px rgba(0,0,0,.25)' }}>
-                <div style={{ width: '54px', height: '54px', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg,rgba(45,150,90,.18),rgba(45,150,90,.05))', border: '1px solid rgba(45,150,90,.3)', marginBottom: '20px' }}>
-                  <span className="ms" style={{ fontSize: '27px', color: '#5BBF89' }}>{r.icon}</span>
+              <div key={r.title} style={{ display: 'flex', flexDirection: 'column', padding: '28px', borderRadius: '22px', background: 'var(--surface)', border: '1px solid var(--accent-12)', backdropFilter: 'blur(20px)', boxShadow: 'var(--shadow-md)' }}>
+                <div style={{ width: '54px', height: '54px', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--success-tint)', border: '1px solid var(--success-line)', marginBottom: '20px' }}>
+                  <span className="ms" style={{ fontSize: '27px', color: 'var(--success)' }}>{r.icon}</span>
                 </div>
-                <div style={{ fontSize: '18px', fontWeight: 700, color: '#F5F5F0', marginBottom: '7px' }}>{r.title}</div>
-                <div style={{ fontSize: '13.5px', lineHeight: 1.55, color: 'rgba(245,245,240,.5)', marginBottom: '24px', flex: 1 }}>{r.desc}</div>
-                <button onClick={r.onClick} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '9px', height: '48px', border: 'none', borderRadius: '14px', cursor: 'pointer', background: 'linear-gradient(135deg,#F0C040,#D4AF37)', color: '#0A0A0A', fontSize: '14.5px', fontWeight: 700, boxShadow: '0 10px 24px rgba(212,175,55,.22)' }}>
+                <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--ink)', marginBottom: '7px' }}>{r.title}</div>
+                <div style={{ fontSize: '13.5px', lineHeight: 1.55, color: 'var(--ink-55)', marginBottom: '24px', flex: 1 }}>{r.desc}</div>
+                <button onClick={r.onClick} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '9px', height: '48px', border: 'none', borderRadius: '14px', cursor: 'pointer', background: 'var(--accent-grad)', color: 'var(--on-accent)', fontSize: '14.5px', fontWeight: 700, boxShadow: 'var(--shadow-accent)' }}>
                   <span className="ms" style={{ fontSize: '20px' }}>download</span>Télécharger Excel
                 </button>
               </div>

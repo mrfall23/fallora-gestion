@@ -1,20 +1,84 @@
 @import "tailwindcss";
 
+/* ─────────────────────────────────────────────────────────────
+   Charte Fallora — palette du logo (crème / brun / terracotta)
+   Toutes les couleurs de l'app dérivent de ces tokens.
+   ───────────────────────────────────────────────────────────── */
+:root {
+  /* Fonds */
+  --bg: #ECE5D6;
+  --bg-top: #F3EDE0;
+  --bg-bottom: #E6DECC;
+  --sidebar: linear-gradient(180deg, #F1EADB, #E7DFCE);
+
+  /* Texte (brun du wordmark) */
+  --ink: #3E2C20;
+  --ink-90: rgba(62, 44, 32, .90);
+  --ink-70: rgba(62, 44, 32, .68);
+  --ink-55: rgba(62, 44, 32, .55);
+  --ink-45: rgba(62, 44, 32, .45);
+  --ink-35: rgba(62, 44, 32, .35);
+  --ink-25: rgba(62, 44, 32, .25);
+
+  /* Accent terracotta (remplace l'or) */
+  --accent: #A9673D;
+  --accent-bright: #C0803F;
+  --accent-deep: #8C4F2C;
+  --accent-grad: linear-gradient(135deg, #C6935C, #A15C31);
+  --accent-08: rgba(169, 103, 61, .08);
+  --accent-12: rgba(169, 103, 61, .12);
+  --accent-16: rgba(169, 103, 61, .16);
+  --accent-20: rgba(169, 103, 61, .20);
+  --accent-25: rgba(169, 103, 61, .25);
+  --accent-30: rgba(169, 103, 61, .30);
+
+  /* Surfaces (glassmorphism clair) */
+  --surface: rgba(255, 252, 246, .60);
+  --surface-2: rgba(255, 252, 246, .82);
+  --surface-inset: rgba(120, 90, 60, .07);
+  --avatar: linear-gradient(135deg, #EEE1CE, #E3D3BB);
+  --img-empty: #EFE7D8;
+
+  /* Lignes */
+  --line: rgba(62, 44, 32, .12);
+  --line-soft: rgba(62, 44, 32, .07);
+
+  /* Sur accent */
+  --on-accent: #FBF6EC;
+
+  /* Sémantique */
+  --success: #3F9468;
+  --success-tint: rgba(63, 148, 104, .13);
+  --success-line: rgba(63, 148, 104, .28);
+  --warn: #C08A2E;
+  --warn-tint: rgba(192, 138, 46, .14);
+  --warn-line: rgba(192, 138, 46, .30);
+  --danger: #BE5540;
+  --danger-tint: rgba(190, 85, 64, .10);
+  --danger-line: rgba(190, 85, 64, .25);
+
+  /* Ombres (chaudes) */
+  --shadow-lg: 0 18px 50px rgba(62, 44, 32, .14);
+  --shadow-md: 0 8px 30px rgba(62, 44, 32, .10);
+  --shadow-accent: 0 12px 30px rgba(169, 103, 61, .22);
+}
+
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  background: #0A0A0A;
-  font-family: 'Manrope', sans-serif;
+  background: var(--bg);
+  font-family: var(--font-manrope), sans-serif;
   -webkit-font-smoothing: antialiased;
-  color: #F5F5F0;
+  color: var(--ink);
 }
-input, button, select, textarea { font-family: 'Manrope', sans-serif; }
+input, button, select, textarea { font-family: var(--font-manrope), sans-serif; }
+input::placeholder, textarea::placeholder { color: var(--ink-35); }
 
-@keyframes glowPulse { 0%,100%{opacity:.45} 50%{opacity:.85} }
+@keyframes glowPulse { 0%,100%{opacity:.35} 50%{opacity:.7} }
 @keyframes fadeUp { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:none} }
 
 ::-webkit-scrollbar { width: 9px; height: 9px; }
-::-webkit-scrollbar-thumb { background: rgba(212,175,55,.18); border-radius: 10px; }
+::-webkit-scrollbar-thumb { background: var(--accent-20); border-radius: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 
 .ms {
@@ -29,3 +93,9 @@ input, button, select, textarea { font-family: 'Manrope', sans-serif; }
 }
 
 .fade-up { animation: fadeUp .4s ease; }
+
+/* Accessibilité clavier : focus visible cohérent */
+:where(button, a, input, textarea, select):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

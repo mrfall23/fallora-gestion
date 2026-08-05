@@ -2,10 +2,10 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
-const BADGE_UP = { fontSize: '12px', fontWeight: 700, color: '#5BBF89', background: 'rgba(91,191,137,.12)', padding: '3px 9px', borderRadius: '8px' } as const;
-const BADGE_WARN = { fontSize: '12px', fontWeight: 700, color: '#F0C040', background: 'rgba(240,192,64,.12)', padding: '3px 9px', borderRadius: '8px' } as const;
-const BADGE_PAID = { fontSize: '12px', fontWeight: 700, color: '#5BBF89', background: 'rgba(91,191,137,.13)', border: '1px solid rgba(91,191,137,.25)', padding: '5px 12px', borderRadius: '20px' } as const;
-const BADGE_PART = { fontSize: '12px', fontWeight: 700, color: '#F0C040', background: 'rgba(240,192,64,.13)', border: '1px solid rgba(240,192,64,.28)', padding: '5px 12px', borderRadius: '20px' } as const;
+const BADGE_UP = { fontSize: '12px', fontWeight: 700, color: 'var(--success)', background: 'var(--success-tint)', padding: '3px 9px', borderRadius: '8px' } as const;
+const BADGE_WARN = { fontSize: '12px', fontWeight: 700, color: 'var(--warn)', background: 'var(--warn-tint)', padding: '3px 9px', borderRadius: '8px' } as const;
+const BADGE_PAID = { fontSize: '12px', fontWeight: 700, color: 'var(--success)', background: 'var(--success-tint)', border: '1px solid var(--success-line)', padding: '5px 12px', borderRadius: '20px' } as const;
+const BADGE_PART = { fontSize: '12px', fontWeight: 700, color: 'var(--warn)', background: 'var(--warn-tint)', border: '1px solid var(--warn-line)', padding: '5px 12px', borderRadius: '20px' } as const;
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState({ totalVentes: 0, totalProduits: 0, stockRestant: 0, paiementsEnAttente: 0 });
@@ -20,7 +20,34 @@ export default function AdminDashboard() {
     return () => { supabase.removeChannel(canal); };
   }, []);
 
+  // Chemin normal : une seule RPC, tout est agrege cote base.
   const chargerStats = async () => {
+    const { data, error } = await supabase.rpc('tableau_de_bord_admin');
+    if (error || !data) {
+      // Repli : la migration 20260805120000_tableau_de_bord_admin n'est
+      // peut-etre pas encore appliquee. On garde l'ancien calcul le temps du
+      // deploiement — a retirer une fois la RPC en place partout.
+      console.warn('RPC tableau_de_bord_admin indisponible, repli client-side.', error?.message);
+      return chargerStatsFallback();
+    }
+    const d = data as any;
+    setStats({
+      totalVentes: Number(d.stats.total_ventes) || 0,
+      totalProduits: Number(d.stats.produits_vendus) || 0,
+      stockRestant: Number(d.stats.stock_restant) || 0,
+      paiementsEnAttente: Number(d.stats.paiements_en_attente) || 0,
+    });
+    setVentesRecentes((d.ventes_recentes || []).map((v: any) => ({
+      id: v.id, clienteNom: v.cliente_nom || 'Inconnue', vendeuseNom: v.vendeuse_nom || 'Inconnue',
+      total: Number(v.total) || 0, statut_paiement: v.statut_paiement,
+    })));
+    setTopVendeuses((d.top_vendeuses || []).map((v: any) => ({
+      id: v.id, nom: v.nom, nb: Number(v.nb) || 0, total: Number(v.total) || 0,
+    })));
+  };
+
+  // Ancien calcul (repli). Rapatrie toutes les ventes dans le navigateur.
+  const chargerStatsFallback = async () => {
     const { data: ventes } = await supabase.from('ventes').select('id, total, reste_a_payer, montant_paye, vendeuse_id, cliente_id, date_vente, statut_paiement').eq('annulee', false).order('date_vente', { ascending: false });
     const venteIds = (ventes || []).map((v: any) => v.id);
     const { data: venteProduits } = venteIds.length > 0 ? await supabase.from('vente_produits').select('quantite, vente_id').in('vente_id', venteIds) : { data: [] };
@@ -66,9 +93,9 @@ export default function AdminDashboard() {
   ];
 
   const medals = [
-    { color: '#F0C040', bg: 'rgba(240,192,64,.14)', border: 'rgba(240,192,64,.4)', icon: 'emoji_events' },
-    { color: '#CDD0D6', bg: 'rgba(205,208,214,.12)', border: 'rgba(205,208,214,.35)', icon: 'workspace_premium' },
-    { color: '#D08B53', bg: 'rgba(208,139,83,.13)', border: 'rgba(208,139,83,.35)', icon: 'military_tech' },
+    { color: '#B8912E', bg: 'rgba(184,145,46,.14)', border: 'rgba(184,145,46,.4)', icon: 'emoji_events' },
+    { color: '#8C9099', bg: 'rgba(140,144,153,.14)', border: 'rgba(140,144,153,.38)', icon: 'workspace_premium' },
+    { color: '#A5673B', bg: 'rgba(165,103,59,.15)', border: 'rgba(165,103,59,.38)', icon: 'military_tech' },
   ];
 
   return (
@@ -76,17 +103,17 @@ export default function AdminDashboard() {
       {/* Stats cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(224px,1fr))', gap: '18px', marginBottom: '24px' }}>
         {STATS_CARDS.map(s => (
-          <div key={s.label} style={{ padding: '22px', borderRadius: '20px', background: 'rgba(255,255,255,.035)', border: '1px solid rgba(212,175,55,.12)', backdropFilter: 'blur(20px)', boxShadow: '0 8px 30px rgba(0,0,0,.25)' }}>
+          <div key={s.label} style={{ padding: '22px', borderRadius: '20px', background: 'var(--surface)', border: '1px solid var(--accent-12)', backdropFilter: 'blur(20px)', boxShadow: 'var(--shadow-md)' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px' }}>
-              <div style={{ width: '46px', height: '46px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg,rgba(240,192,64,.18),rgba(212,175,55,.06))', border: '1px solid rgba(212,175,55,.2)' }}>
-                <span className="ms" style={{ fontSize: '23px', color: '#F0C040' }}>{s.icon}</span>
+              <div style={{ width: '46px', height: '46px', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--accent-12)', border: '1px solid var(--accent-20)' }}>
+                <span className="ms" style={{ fontSize: '23px', color: 'var(--accent)' }}>{s.icon}</span>
               </div>
               <span style={s.subStyle}>{s.sub}</span>
             </div>
-            <div style={{ fontSize: '12px', fontWeight: 600, letterSpacing: '.4px', color: 'rgba(245,245,240,.5)', textTransform: 'uppercase' }}>{s.label}</div>
+            <div style={{ fontSize: '12px', fontWeight: 600, letterSpacing: '.4px', color: 'var(--ink-55)', textTransform: 'uppercase' }}>{s.label}</div>
             <div style={{ marginTop: '6px', display: 'flex', alignItems: 'baseline', gap: '7px' }}>
-              <span style={{ fontSize: '28px', fontWeight: 800, color: '#F5F5F0', letterSpacing: '-.5px' }}>{s.value}</span>
-              <span style={{ fontSize: '13px', fontWeight: 600, color: '#D4AF37' }}>{s.unit}</span>
+              <span style={{ fontSize: '28px', fontWeight: 800, color: 'var(--ink)', letterSpacing: '-.5px' }}>{s.value}</span>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--accent)' }}>{s.unit}</span>
             </div>
           </div>
         ))}
@@ -95,26 +122,26 @@ export default function AdminDashboard() {
       {/* Bottom panels */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))', gap: '18px' }}>
         {/* Ventes récentes */}
-        <div style={{ padding: '24px', borderRadius: '20px', background: 'rgba(255,255,255,.035)', border: '1px solid rgba(255,255,255,.06)', backdropFilter: 'blur(20px)' }}>
+        <div style={{ padding: '24px', borderRadius: '20px', background: 'var(--surface)', border: '1px solid var(--line)', backdropFilter: 'blur(20px)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px' }}>
-            <div style={{ fontSize: '16px', fontWeight: 700, color: '#F5F5F0' }}>Ventes récentes</div>
-            <a href="/admin/ventes" style={{ fontSize: '13px', color: '#D4AF37', textDecoration: 'none', fontWeight: 600 }}>Tout voir</a>
+            <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--ink)' }}>Ventes récentes</div>
+            <a href="/admin/ventes" style={{ fontSize: '13px', color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>Tout voir</a>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
             {ventesRecentes.length === 0 ? (
-              <p style={{ color: 'rgba(245,245,240,.4)', fontSize: '13px', textAlign: 'center', padding: '20px 0' }}>Aucune vente pour le moment.</p>
+              <p style={{ color: 'var(--ink-45)', fontSize: '13px', textAlign: 'center', padding: '20px 0' }}>Aucune vente pour le moment.</p>
             ) : ventesRecentes.map(v => (
               <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '11px 8px', borderRadius: '12px' }}>
-                <div style={{ width: '36px', height: '36px', borderRadius: '11px', background: 'linear-gradient(135deg,#262420,#191815)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid rgba(212,175,55,.16)', flexShrink: 0 }}>
-                  <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '16px', color: '#D4AF37', fontWeight: 600 }}>{v.clienteNom[0]}</span>
+                <div style={{ width: '36px', height: '36px', borderRadius: '11px', background: 'var(--avatar)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--accent-16)', flexShrink: 0 }}>
+                  <span style={{ fontFamily: "var(--font-cormorant), serif", fontSize: '16px', color: 'var(--accent)', fontWeight: 600 }}>{v.clienteNom[0]}</span>
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: '14px', fontWeight: 600, color: '#F5F5F0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.clienteNom}</div>
-                  <div style={{ fontSize: '12px', color: 'rgba(245,245,240,.4)' }}>{v.vendeuseNom}</div>
+                  <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.clienteNom}</div>
+                  <div style={{ fontSize: '12px', color: 'var(--ink-45)' }}>{v.vendeuseNom}</div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '14px', fontWeight: 700, color: '#F5F5F0' }}>{v.total?.toLocaleString()}</div>
-                  <div style={{ fontSize: '11px', color: 'rgba(245,245,240,.4)' }}>FCFA</div>
+                  <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--ink)' }}>{v.total?.toLocaleString()}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--ink-45)' }}>FCFA</div>
                 </div>
                 <span style={v.statut_paiement === 'paye' ? BADGE_PAID : BADGE_PART}>{v.statut_paiement === 'paye' ? 'Payé' : 'Partiel'}</span>
               </div>
@@ -123,14 +150,14 @@ export default function AdminDashboard() {
         </div>
 
         {/* Top vendeuses */}
-        <div style={{ padding: '24px', borderRadius: '20px', background: 'rgba(255,255,255,.035)', border: '1px solid rgba(255,255,255,.06)', backdropFilter: 'blur(20px)' }}>
+        <div style={{ padding: '24px', borderRadius: '20px', background: 'var(--surface)', border: '1px solid var(--line)', backdropFilter: 'blur(20px)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px' }}>
-            <div style={{ fontSize: '16px', fontWeight: 700, color: '#F5F5F0' }}>Meilleures vendeuses</div>
-            <a href="/admin/vendeuses" style={{ fontSize: '13px', color: '#D4AF37', textDecoration: 'none', fontWeight: 600 }}>Classement</a>
+            <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--ink)' }}>Meilleures vendeuses</div>
+            <a href="/admin/vendeuses" style={{ fontSize: '13px', color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>Classement</a>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {topVendeuses.length === 0 ? (
-              <p style={{ color: 'rgba(245,245,240,.4)', fontSize: '13px', textAlign: 'center', padding: '20px 0' }}>Aucune donnée.</p>
+              <p style={{ color: 'var(--ink-45)', fontSize: '13px', textAlign: 'center', padding: '20px 0' }}>Aucune donnée.</p>
             ) : topVendeuses.map((v, i) => {
               const m = medals[i] || medals[2];
               return (
@@ -139,12 +166,12 @@ export default function AdminDashboard() {
                     <span className="ms" style={{ fontSize: '18px', color: m.color }}>{m.icon}</span>
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#F5F5F0' }}>{v.nom}</div>
-                    <div style={{ fontSize: '12px', color: 'rgba(245,245,240,.4)' }}>{v.nb} vente{v.nb > 1 ? 's' : ''}</div>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--ink)' }}>{v.nom}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--ink-45)' }}>{v.nb} vente{v.nb > 1 ? 's' : ''}</div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: '14px', fontWeight: 700, color: '#D4AF37' }}>{v.total.toLocaleString()}</div>
-                    <div style={{ fontSize: '11px', color: 'rgba(245,245,240,.4)' }}>FCFA</div>
+                    <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--accent)' }}>{v.total.toLocaleString()}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--ink-45)' }}>FCFA</div>
                   </div>
                 </div>
               );
