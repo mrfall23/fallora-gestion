@@ -69,19 +69,26 @@ export default function VendeusePage() {
     if (statutPaiement === 'partiel' && (!montantPaye || montantPayeNum <= 0)) { setErreur('Entrez le montant payé.'); return; }
     setErreur(''); setEnregistrement(true);
     try {
-      const { error } = await supabase.rpc('enregistrer_vente', {
-        p_cliente_nom: cliente.nom,
-        p_cliente_telephone: cliente.telephone || null,
-        p_produits: panier.map(p => ({ produit_id: p.id, quantite: p.quantite })),
-        p_statut_paiement: statutPaiement,
-        p_montant_paye: statutPaiement === 'paye' ? null : montantPayeNum,
-        p_mode_paiement: modePaiement,
+      // Passe par /api/ventes : la meme RPC enregistrer_vente() est appelee cote
+      // serveur (vente identique, atomique, stock verrouille), puis l'admin est
+      // notifie. La notification ne peut jamais faire echouer la vente.
+      const reponse = await fetch('/api/ventes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cliente_nom: cliente.nom,
+          cliente_telephone: cliente.telephone || null,
+          produits: panier.map(p => ({ produit_id: p.id, quantite: p.quantite })),
+          statut_paiement: statutPaiement,
+          montant_paye: statutPaiement === 'paye' ? null : montantPayeNum,
+          mode_paiement: modePaiement,
+        }),
       });
+      const resultat = await reponse.json().catch(() => ({}));
 
-      if (error) {
-        // La fonction remonte des messages metier utiles : stock insuffisant,
-        // produit inactif, montant invalide.
-        setErreur(error.message || 'Erreur lors de l\'enregistrement.');
+      if (!reponse.ok) {
+        // Messages metier utiles : stock insuffisant, produit inactif, montant invalide.
+        setErreur(resultat.message || 'Erreur lors de l\'enregistrement.');
         return;
       }
 

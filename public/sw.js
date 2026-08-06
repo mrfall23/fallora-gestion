@@ -63,3 +63,32 @@ self.addEventListener('fetch', (e) => {
     })());
   }
 });
+
+// ── Notifications de vente (Web Push) ──
+self.addEventListener('push', (e) => {
+  let data = {};
+  try { data = e.data ? e.data.json() : {}; } catch { /* payload non-JSON */ }
+  const title = data.title || 'Nouvelle vente';
+  e.waitUntil(
+    self.registration.showNotification(title, {
+      body: data.body || '',
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      tag: data.tag || 'vente',
+      data: { url: data.url || '/admin' },
+      vibrate: [80, 40, 80],
+    }),
+  );
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const cible = (e.notification.data && e.notification.data.url) || '/admin';
+  e.waitUntil((async () => {
+    const fenetres = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of fenetres) {
+      if ('focus' in c) { try { await c.navigate(cible); } catch {} return c.focus(); }
+    }
+    if (self.clients.openWindow) return self.clients.openWindow(cible);
+  })());
+});

@@ -4,6 +4,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useUtilisateur, seDeconnecter } from '@/lib/utilisateur';
 import { FalloraLogo } from '../components/Logo';
 import { useIsMobile } from '../components/useMediaQuery';
+import PushToggle from '../components/PushToggle';
 
 const NAV = [
   { href: '/admin', icon: 'dashboard', label: 'Tableau de bord' },
@@ -82,8 +83,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           })}
         </nav>
 
-        {/* User profile */}
-        <div style={{ marginTop: 'auto', padding: '14px', borderRadius: '16px', background: 'var(--surface)', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {/* Bas de sidebar : notifications (admin) + profil */}
+        <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', paddingTop: '14px' }}>
+        <PushToggle />
+        <div style={{ padding: '14px', borderRadius: '16px', background: 'var(--surface)', border: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div style={{ width: '38px', height: '38px', borderRadius: '11px', background: 'var(--avatar)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--accent-25)', flexShrink: 0 }}>
             <span style={{ fontFamily: "var(--font-cormorant), serif", fontSize: '18px', color: 'var(--accent)', fontWeight: 600 }}>{initial}</span>
           </div>
@@ -94,6 +97,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <button onClick={deconnecter} title="Déconnexion" aria-label="Se déconnecter" style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px', display: 'flex' }}>
             <span className="ms" style={{ fontSize: '20px', color: 'var(--ink-45)' }}>logout</span>
           </button>
+        </div>
         </div>
       </aside>
 
