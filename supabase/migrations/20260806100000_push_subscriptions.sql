@@ -24,3 +24,9 @@ alter table public.push_subscriptions enable row level security;
 -- Volontairement aucune policy : seules les routes serveur (cle secrete)
 -- lisent et ecrivent. anon n'a de toute facon plus rien sur public.
 revoke all on public.push_subscriptions from anon;
+
+-- La cle secrete (role service_role) doit pouvoir lire/ecrire cette table.
+-- RLS reste active sans policy pour fermer l'acces aux clients, mais le GRANT
+-- de table est necessaire : sans lui, les routes serveur se prennent un
+-- "permission denied" (contrairement aux tables plus anciennes, deja grantees).
+grant all on public.push_subscriptions to service_role;
