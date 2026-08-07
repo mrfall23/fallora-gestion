@@ -6,7 +6,7 @@ import { useUtilisateur, seDeconnecter } from '@/lib/utilisateur';
 import { FalloraLogo } from '../components/Logo';
 import { useIsMobile } from '../components/useMediaQuery';
 import Recu, { type RecuData } from '../components/Recu';
-import { partagerImageRecu, whatsappTexte } from '../components/recuPartage';
+import { envoyerLienWhatsApp, whatsappTexte } from '../components/recuPartage';
 
 const inputStyle: React.CSSProperties = { height: '44px', padding: '0 14px', borderRadius: '12px', background: 'var(--surface-inset)', border: '1px solid var(--line)', outline: 'none', color: 'var(--ink)', fontSize: '14px', width: '100%' };
 
@@ -24,6 +24,7 @@ export default function VendeusePage() {
   const [succes, setSucces] = useState('');
   const [erreur, setErreur] = useState('');
   const [recu, setRecu] = useState<RecuData | null>(null);
+  const [envoiRecu, setEnvoiRecu] = useState(false);
   const recuRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
@@ -298,13 +299,13 @@ export default function VendeusePage() {
                 <Recu data={recu} />
               </div>
             </div>
-            <button onClick={async () => { if (recuRef.current) await partagerImageRecu(recuRef.current, recu); }}
-              style={{ height: '52px', border: 'none', borderRadius: '14px', cursor: 'pointer', background: 'var(--accent-grad)', color: 'var(--on-accent)', fontSize: '15px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '9px', boxShadow: 'var(--shadow-accent)' }}>
-              <span className="ms" style={{ fontSize: '20px' }}>ios_share</span>Partager le reçu (WhatsApp)
+            <button disabled={envoiRecu} onClick={async () => { if (recuRef.current) { setEnvoiRecu(true); try { await envoyerLienWhatsApp(recuRef.current, recu); } finally { setEnvoiRecu(false); } } }}
+              style={{ height: '52px', border: 'none', borderRadius: '14px', cursor: envoiRecu ? 'wait' : 'pointer', background: 'var(--accent-grad)', color: 'var(--on-accent)', fontSize: '15px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '9px', boxShadow: 'var(--shadow-accent)', opacity: envoiRecu ? 0.75 : 1 }}>
+              <span className="ms" style={{ fontSize: '20px' }}>send</span>{envoiRecu ? 'Préparation…' : 'Envoyer le reçu par WhatsApp'}
             </button>
             <button onClick={() => whatsappTexte(recu)}
               style={{ height: '46px', border: '1px solid var(--accent-25)', borderRadius: '13px', cursor: 'pointer', background: 'var(--surface)', color: 'var(--accent-deep)', fontSize: '13.5px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-              <span className="ms" style={{ fontSize: '18px' }}>chat</span>Envoyer en texte
+              <span className="ms" style={{ fontSize: '18px' }}>chat</span>Envoyer en texte (secours)
             </button>
             <button onClick={() => setRecu(null)}
               style={{ height: '46px', border: '1px solid var(--line)', borderRadius: '13px', cursor: 'pointer', background: 'transparent', color: 'var(--ink-55)', fontSize: '14px', fontWeight: 600 }}>
