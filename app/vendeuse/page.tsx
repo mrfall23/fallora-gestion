@@ -1,10 +1,12 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useUtilisateur, seDeconnecter } from '@/lib/utilisateur';
 import { FalloraLogo } from '../components/Logo';
 import { useIsMobile } from '../components/useMediaQuery';
+import Recu, { type RecuData } from '../components/Recu';
+import { partagerImageRecu, whatsappTexte } from '../components/recuPartage';
 
 const inputStyle: React.CSSProperties = { height: '44px', padding: '0 14px', borderRadius: '12px', background: 'var(--surface-inset)', border: '1px solid var(--line)', outline: 'none', color: 'var(--ink)', fontSize: '14px', width: '100%' };
 
@@ -21,6 +23,8 @@ export default function VendeusePage() {
   const [enregistrement, setEnregistrement] = useState(false);
   const [succes, setSucces] = useState('');
   const [erreur, setErreur] = useState('');
+  const [recu, setRecu] = useState<RecuData | null>(null);
+  const recuRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
   // La redirection si non connecte est prise en charge par useUtilisateur().
@@ -91,6 +95,23 @@ export default function VendeusePage() {
         setErreur(resultat.message || 'Erreur lors de l\'enregistrement.');
         return;
       }
+
+      // On capture un reçu (snapshot) AVANT de vider le panier.
+      const numero = `${new Date().getFullYear()}-${String(resultat?.id ?? '').padStart(4, '0')}`;
+      setRecu({
+        boutique: 'Fallora',
+        numero,
+        date: new Date().toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+        vendeuse: user?.nom || '',
+        client: cliente.nom.trim(),
+        telephone: cliente.telephone || null,
+        items: panier.map(p => ({ nom: p.nom, quantite: p.quantite, prix: p.prix })),
+        total,
+        paye: montantEffectif,
+        reste: resteAPayer,
+        mode: modePaiement,
+        statut: statutPaiement,
+      });
 
       setSucces('Vente enregistrée avec succès !');
       setPanier([]); setCliente({ nom: '', telephone: '' }); setMontantPaye(''); setStatutPaiement('paye'); setModePaiement('cash');
@@ -264,6 +285,30 @@ export default function VendeusePage() {
 
             <button onClick={enregistrerVente} disabled={enregistrement || panier.length === 0} style={{ width: '100%', height: '52px', border: 'none', borderRadius: '15px', cursor: enregistrement || panier.length === 0 ? 'not-allowed' : 'pointer', background: panier.length === 0 ? 'var(--accent-20)' : 'var(--accent-grad)', color: 'var(--on-accent)', fontSize: '15px', fontWeight: 700, boxShadow: panier.length > 0 ? 'var(--shadow-accent)' : 'none', opacity: enregistrement ? 0.7 : 1 }}>
               {enregistrement ? 'Enregistrement...' : 'Valider la vente'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {recu && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(62,44,32,.55)', backdropFilter: 'blur(3px)', display: 'flex', justifyContent: 'center', padding: '20px', overflowY: 'auto' }}>
+          <div style={{ width: '100%', maxWidth: '400px', margin: 'auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', overflowX: 'auto' }}>
+              <div ref={recuRef} style={{ borderRadius: '16px', overflow: 'hidden', boxShadow: 'var(--shadow-lg)' }}>
+                <Recu data={recu} />
+              </div>
+            </div>
+            <button onClick={async () => { if (recuRef.current) await partagerImageRecu(recuRef.current, recu); }}
+              style={{ height: '52px', border: 'none', borderRadius: '14px', cursor: 'pointer', background: 'var(--accent-grad)', color: 'var(--on-accent)', fontSize: '15px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '9px', boxShadow: 'var(--shadow-accent)' }}>
+              <span className="ms" style={{ fontSize: '20px' }}>ios_share</span>Partager le reçu (WhatsApp)
+            </button>
+            <button onClick={() => whatsappTexte(recu)}
+              style={{ height: '46px', border: '1px solid var(--accent-25)', borderRadius: '13px', cursor: 'pointer', background: 'var(--surface)', color: 'var(--accent-deep)', fontSize: '13.5px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+              <span className="ms" style={{ fontSize: '18px' }}>chat</span>Envoyer en texte
+            </button>
+            <button onClick={() => setRecu(null)}
+              style={{ height: '46px', border: '1px solid var(--line)', borderRadius: '13px', cursor: 'pointer', background: 'transparent', color: 'var(--ink-55)', fontSize: '14px', fontWeight: 600 }}>
+              Nouvelle vente
             </button>
           </div>
         </div>
