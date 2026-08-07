@@ -11,9 +11,9 @@ function numeroWa(tel?: string | null): string {
   return num;
 }
 
-function ouvrirWa(num: string, texte: string) {
+function urlWa(num: string, texte: string): string {
   const t = encodeURIComponent(texte);
-  window.open(num ? `https://wa.me/${num}?text=${t}` : `https://wa.me/?text=${t}`, '_blank');
+  return num ? `https://wa.me/${num}?text=${t}` : `https://wa.me/?text=${t}`;
 }
 
 /** Reçu en texte complet (secours : marche avec n'importe quel numero, meme non enregistre). */
@@ -29,37 +29,43 @@ function messageLien(d: RecuData, url: string): string {
   return `*${d.boutique}* — Reçu ${d.numero}\nTotal : ${fmt(d.total)} FCFA (${statut})\n\n🧾 Votre reçu : ${url}\n\nMerci de votre achat 💛`;
 }
 
-/** Envoie WhatsApp en TEXTE (secours). */
+/** Envoie WhatsApp en TEXTE (secours). Synchrone -> jamais bloque. */
 export function whatsappTexte(d: RecuData) {
-  ouvrirWa(numeroWa(d.telephone), texteRecu(d));
+  window.open(urlWa(numeroWa(d.telephone), texteRecu(d)), '_blank');
 }
 
 /**
- * Chemin principal : genere l'image du reçu, l'heberge, et envoie un LIEN par
- * WhatsApp (marche avec tous les numeros, meme non enregistres, logo compris).
- * Si l'hebergement echoue (pas d'internet, etc.), repli automatique sur le texte.
+ * Chemin principal : genere l'image du reçu, l'heberge, envoie un LIEN par WhatsApp.
+ *
+ * Point cle : on ouvre l'onglet WhatsApp DES LE CLIC (dans le geste utilisateur),
+ * sinon les mobiles bloquent l'ouverture apres le delai de preparation de l'image.
+ * On y injecte ensuite le message une fois le lien pret. Repli automatique en
+ * texte si l'hebergement echoue (pas d'internet, etc.).
  */
 export async function envoyerLienWhatsApp(node: HTMLElement, d: RecuData): Promise<'lien' | 'texte'> {
-  let dataUrl = '';
+  // 1) Onglet ouvert immediatement (autorise car dans le clic).
+  const win = window.open('', '_blank');
   try {
-    dataUrl = await toPng(node, { pixelRatio: 2, backgroundColor: '#FBF7EF', cacheBust: true });
-  } catch {
-    dataUrl = '';
-  }
-  if (!dataUrl) { whatsappTexte(d); return 'texte'; }
+    win?.document.write('<p style="font-family:sans-serif;padding:24px;color:#3E2C20">Préparation du reçu…</p>');
+  } catch { /* about:blank non accessible : on ignore */ }
 
+  // 2) Generation + hebergement de l'image (asynchrone).
+  let message = texteRecu(d);
+  let type: 'lien' | 'texte' = 'texte';
   try {
+    const dataUrl = await toPng(node, { pixelRatio: 2, backgroundColor: '#FBF7EF', cacheBust: true });
     const r = await fetch('/api/recu', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ image: dataUrl, numero: d.numero }),
     });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok || !j.url) { whatsappTexte(d); return 'texte'; }
-    ouvrirWa(numeroWa(d.telephone), messageLien(d, j.url));
-    return 'lien';
-  } catch {
-    whatsappTexte(d);
-    return 'texte';
-  }
+    if (r.ok && j.url) { message = messageLien(d, j.url); type = 'lien'; }
+  } catch { /* on garde le repli texte */ }
+
+  // 3) On dirige l'onglet deja ouvert vers WhatsApp (ou l'onglet courant en secours).
+  const url = urlWa(numeroWa(d.telephone), message);
+  if (win && !win.closed) win.location.href = url;
+  else window.location.href = url;
+  return type;
 }
