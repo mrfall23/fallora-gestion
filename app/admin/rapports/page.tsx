@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { toutLire, lireParIds } from '@/lib/requetes';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 
@@ -19,17 +20,16 @@ export default function AdminRapports() {
   const chargerDonnees = async () => {
     const { data: per } = await supabase.from('periodes').select('*').order('debut', { ascending: false });
     setPeriodes(per || []);
-    const { data: ventesData } = await supabase.from('ventes').select('*').eq('annulee', false).order('date_vente', { ascending: false });
-    if (!ventesData || ventesData.length === 0) { setVentes([]); setChargement(false); return; }
-    const clienteIds = [...new Set(ventesData.map((v: any) => v.cliente_id).filter(Boolean))];
-    const { data: clientes } = clienteIds.length > 0 ? await supabase.from('clientes').select('*').in('id', clienteIds) : { data: [] };
-    const userIds = [...new Set(ventesData.map((v: any) => v.vendeuse_id).filter(Boolean))];
-    const { data: utilisateurs } = userIds.length > 0 ? await supabase.from('utilisateurs').select('id, nom').in('id', userIds) : { data: [] };
+    const ventesData = await toutLire(() => supabase.from('ventes').select('*').eq('annulee', false).order('date_vente', { ascending: false }).order('id', { ascending: false }));
+    if (ventesData.length === 0) { setVentes([]); setChargement(false); return; }
     const venteIds = ventesData.map((v: any) => v.id);
-    const { data: venteProduits } = await supabase.from('vente_produits').select('*').in('vente_id', venteIds);
-    const produitIds = [...new Set((venteProduits || []).map((vp: any) => vp.produit_id).filter(Boolean))];
-    const { data: produits } = produitIds.length > 0 ? await supabase.from('produits').select('id, nom').in('id', produitIds) : { data: [] };
-    const { data: paiements } = await supabase.from('paiements').select('*').in('vente_id', venteIds);
+    const [clientes, utilisateurs, venteProduits, paiements] = await Promise.all([
+      lireParIds('clientes', '*', 'id', ventesData.map((v: any) => v.cliente_id)),
+      lireParIds('utilisateurs', 'id, nom', 'id', ventesData.map((v: any) => v.vendeuse_id)),
+      lireParIds('vente_produits', '*', 'vente_id', venteIds),
+      lireParIds('paiements', '*', 'vente_id', venteIds),
+    ]);
+    const produits = await lireParIds('produits', 'id, nom', 'id', venteProduits.map((vp: any) => vp.produit_id));
     setVentes(ventesData.map((v: any) => ({
       ...v,
       clientes: (clientes || []).find((c: any) => c.id === v.cliente_id) || null,

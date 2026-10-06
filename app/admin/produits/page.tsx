@@ -15,6 +15,7 @@ export default function AdminProduits() {
   const [produitEdite, setProduitEdite] = useState<Produit | null>(null);
   const [form, setForm] = useState(FORM_VIDE);
   const [sauvegarde, setSauvegarde] = useState(false);
+  const [erreur, setErreur] = useState('');
 
   useEffect(() => { chargerProduits(); }, []);
 
@@ -30,21 +31,26 @@ export default function AdminProduits() {
 
   const sauvegarder = async () => {
     if (!form.nom.trim() || form.prix <= 0) return;
-    setSauvegarde(true);
+    setSauvegarde(true); setErreur('');
+    let error;
     if (produitEdite) {
       const diff = form.stock_restant - produitEdite.stock_restant;
-      await supabase.from('produits').update({ nom: form.nom.trim(), prix: form.prix, description: form.description, stock_restant: form.stock_restant, stock_initial: produitEdite.stock_initial + diff, image: form.image }).eq('id', produitEdite.id);
+      ({ error } = await supabase.from('produits').update({ nom: form.nom.trim(), prix: form.prix, description: form.description, stock_restant: form.stock_restant, stock_initial: produitEdite.stock_initial + diff, image: form.image }).eq('id', produitEdite.id));
     } else {
-      await supabase.from('produits').insert({ nom: form.nom.trim(), prix: form.prix, description: form.description, stock_restant: form.stock_restant, stock_initial: form.stock_restant, image: form.image });
+      ({ error } = await supabase.from('produits').insert({ nom: form.nom.trim(), prix: form.prix, description: form.description, stock_restant: form.stock_restant, stock_initial: form.stock_restant, image: form.image }));
     }
-    await chargerProduits();
     setSauvegarde(false);
+    if (error) { setErreur(`Enregistrement impossible : ${error.message}`); return; }
+    await chargerProduits();
     fermerForm();
   };
 
-  const supprimer = async (id: number) => {
-    if (!confirm('Supprimer ce produit ?')) return;
-    await supabase.from('produits').delete().eq('id', id);
+  const supprimer = async (p: Produit) => {
+    if (!confirm(`Supprimer « ${p.nom} » ?`)) return;
+    setErreur('');
+    const { error } = await supabase.from('produits').delete().eq('id', p.id);
+    // 23503 = cle etrangere : le produit figure dans des ventes (historique a conserver).
+    if (error) { setErreur(error.code === '23503' ? `« ${p.nom} » a déjà été vendu : il ne peut pas être supprimé sans effacer l'historique des ventes.` : `Suppression impossible : ${error.message}`); return; }
     await chargerProduits();
   };
 
@@ -63,6 +69,14 @@ export default function AdminProduits() {
           <span className="ms" style={{ fontSize: '20px' }}>add</span>Ajouter un produit
         </button>
       </div>
+
+      {erreur && (
+        <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px', padding: '12px 16px', borderRadius: '14px', background: 'var(--danger-tint)', border: '1px solid var(--danger-line)', color: 'var(--danger)', fontSize: '13.5px' }}>
+          <span className="ms" style={{ fontSize: '20px' }}>error</span>
+          <span style={{ flex: 1 }}>{erreur}</span>
+          <button onClick={() => setErreur('')} aria-label="Fermer" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', display: 'flex' }}><span className="ms" style={{ fontSize: '18px' }}>close</span></button>
+        </div>
+      )}
 
       {/* Formulaire */}
       {formOuvert && (
@@ -132,7 +146,7 @@ export default function AdminProduits() {
                 <button onClick={() => ouvrirEdit(p)} style={{ display: 'flex', alignItems: 'center', gap: '7px', height: '40px', padding: '0 16px', borderRadius: '12px', cursor: 'pointer', background: 'var(--accent-12)', border: '1px solid var(--accent-25)', color: 'var(--accent-deep)', fontSize: '13.5px', fontWeight: 600 }}>
                   <span className="ms" style={{ fontSize: '18px' }}>edit</span>Modifier
                 </button>
-                <button onClick={() => supprimer(p.id)} aria-label={`Supprimer ${p.nom}`} style={{ width: '40px', height: '40px', borderRadius: '12px', cursor: 'pointer', background: 'var(--danger-tint)', border: '1px solid var(--danger-line)', color: 'var(--danger)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <button onClick={() => supprimer(p)} aria-label={`Supprimer ${p.nom}`} style={{ width: '40px', height: '40px', borderRadius: '12px', cursor: 'pointer', background: 'var(--danger-tint)', border: '1px solid var(--danger-line)', color: 'var(--danger)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <span className="ms" style={{ fontSize: '18px' }}>delete</span>
                 </button>
               </div>

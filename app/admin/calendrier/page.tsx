@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { toutLire, lireParIds } from '@/lib/requetes';
 
 type Vente = { id: number; total: number; montant_paye: number; reste_a_payer: number; statut_paiement: string; date_vente: string; vendeuseNom: string; clienteNom: string };
 type Groupe = { cle: string; titre: string; sousTitre: string; active?: boolean; ventes: Vente[] };
@@ -23,16 +24,13 @@ export default function AdminCalendrier() {
   useEffect(() => { charger(); }, []);
 
   const charger = async () => {
-    const [{ data: per }, { data: v }] = await Promise.all([
+    const [{ data: per }, ventesData] = await Promise.all([
       supabase.from('periodes').select('*').order('debut', { ascending: false }),
-      supabase.from('ventes').select('id, total, montant_paye, reste_a_payer, statut_paiement, date_vente, vendeuse_id, cliente_id').eq('annulee', false).order('date_vente', { ascending: false }),
+      toutLire(() => supabase.from('ventes').select('id, total, montant_paye, reste_a_payer, statut_paiement, date_vente, vendeuse_id, cliente_id').eq('annulee', false).order('date_vente', { ascending: false }).order('id', { ascending: false })),
     ]);
-    const ventesData = v || [];
-    const userIds = [...new Set(ventesData.map((x: any) => x.vendeuse_id).filter(Boolean))];
-    const clienteIds = [...new Set(ventesData.map((x: any) => x.cliente_id).filter(Boolean))];
-    const [{ data: users }, { data: clientes }] = await Promise.all([
-      userIds.length ? supabase.from('utilisateurs').select('id, nom').in('id', userIds) : Promise.resolve({ data: [] as any[] }),
-      clienteIds.length ? supabase.from('clientes').select('id, nom').in('id', clienteIds) : Promise.resolve({ data: [] as any[] }),
+    const [users, clientes] = await Promise.all([
+      lireParIds('utilisateurs', 'id, nom', 'id', ventesData.map((x: any) => x.vendeuse_id)),
+      lireParIds('clientes', 'id, nom', 'id', ventesData.map((x: any) => x.cliente_id)),
     ]);
     setPeriodes(per || []);
     setVentes(ventesData.map((x: any) => ({

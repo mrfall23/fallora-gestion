@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { toutLire, lireParIds } from '@/lib/requetes';
 
 const MEDALS = [
   { color: '#B8912E', bg: 'rgba(184,145,46,.14)', border: 'rgba(184,145,46,.4)', icon: 'emoji_events', cardBg: 'linear-gradient(180deg,rgba(184,145,46,.10),var(--surface))' },
@@ -34,17 +35,17 @@ export default function AdminVendeuses() {
 
   const chargerVendeuses = async () => {
     const { data: utilisateurs } = await supabase.from('utilisateurs').select('*').eq('role', 'vendeuse').eq('actif', true);
-    const { data: ventes } = await supabase.from('ventes').select('*').eq('annulee', false);
+    const ventes = await toutLire(() => supabase.from('ventes').select('id, vendeuse_id, total, montant_paye, date_vente').eq('annulee', false).order('id'));
     const { data: objectifs } = await supabase.from('objectifs_vendeuses').select('vendeuse_id, objectif').eq('periode', periodeCourante());
     const debutMois = debutMoisCourant();
-    const venteIds = (ventes || []).map((v: any) => v.id);
-    const { data: venteProduits } = venteIds.length > 0 ? await supabase.from('vente_produits').select('vente_id, quantite').in('vente_id', venteIds) : { data: [] };
+    const venteProduits = await lireParIds('vente_produits', 'vente_id, quantite', 'vente_id', ventes.map((v: any) => v.id));
+    const qteParVente = new Map<number, number>();
+    for (const vp of venteProduits) qteParVente.set(vp.vente_id, (qteParVente.get(vp.vente_id) || 0) + vp.quantite);
     const result = (utilisateurs || []).map((u: any) => {
-      const vv = (ventes || []).filter((v: any) => v.vendeuse_id === u.id);
-      const ids = vv.map((v: any) => v.id);
+      const vv = ventes.filter((v: any) => v.vendeuse_id === u.id);
       const realiseMois = vv.filter((v: any) => new Date(v.date_vente) >= debutMois).reduce((s: number, v: any) => s + v.total, 0);
       const objectif = Number((objectifs || []).find((o: any) => o.vendeuse_id === u.id)?.objectif) || 0;
-      return { ...u, totalVentes: vv.reduce((s: number, v: any) => s + v.total, 0), totalEncaisse: vv.reduce((s: number, v: any) => s + v.montant_paye, 0), nbVentes: vv.length, nbProduits: (venteProduits || []).filter((vp: any) => ids.includes(vp.vente_id)).reduce((s: number, vp: any) => s + vp.quantite, 0), realiseMois, objectif };
+      return { ...u, totalVentes: vv.reduce((s: number, v: any) => s + v.total, 0), totalEncaisse: vv.reduce((s: number, v: any) => s + v.montant_paye, 0), nbVentes: vv.length, nbProduits: vv.reduce((s: number, v: any) => s + (qteParVente.get(v.id) || 0), 0), realiseMois, objectif };
     }).sort((a: any, b: any) => b.totalVentes - a.totalVentes);
     setVendeuses(result);
     setChargement(false);
@@ -62,14 +63,13 @@ export default function AdminVendeuses() {
   const voirDetail = async (vendeuseId: number) => {
     if (detailOuvert === vendeuseId) { setDetailOuvert(null); setVentesDetail([]); return; }
     setDetailOuvert(vendeuseId); setChargementDetail(true);
-    const { data: ventesData } = await supabase.from('ventes').select('*').eq('vendeuse_id', vendeuseId).eq('annulee', false).order('date_vente', { ascending: false });
-    if (!ventesData || ventesData.length === 0) { setVentesDetail([]); setChargementDetail(false); return; }
-    const clienteIds = [...new Set(ventesData.map((v: any) => v.cliente_id).filter(Boolean))];
-    const { data: clientes } = clienteIds.length > 0 ? await supabase.from('clientes').select('id, nom').in('id', clienteIds) : { data: [] };
-    const venteIds = ventesData.map((v: any) => v.id);
-    const { data: vp } = await supabase.from('vente_produits').select('*').in('vente_id', venteIds);
-    const produitIds = [...new Set((vp || []).map((x: any) => x.produit_id).filter(Boolean))];
-    const { data: produits } = produitIds.length > 0 ? await supabase.from('produits').select('id, nom').in('id', produitIds) : { data: [] };
+    const ventesData = await toutLire(() => supabase.from('ventes').select('*').eq('vendeuse_id', vendeuseId).eq('annulee', false).order('date_vente', { ascending: false }).order('id', { ascending: false }));
+    if (ventesData.length === 0) { setVentesDetail([]); setChargementDetail(false); return; }
+    const [clientes, vp] = await Promise.all([
+      lireParIds('clientes', 'id, nom', 'id', ventesData.map((v: any) => v.cliente_id)),
+      lireParIds('vente_produits', '*', 'vente_id', ventesData.map((v: any) => v.id)),
+    ]);
+    const produits = await lireParIds('produits', 'id, nom', 'id', vp.map((x: any) => x.produit_id));
     setVentesDetail(ventesData.map((v: any) => ({ ...v, cliente: (clientes || []).find((c: any) => c.id === v.cliente_id) || null, vente_produits: (vp || []).filter((x: any) => x.vente_id === v.id).map((x: any) => ({ ...x, produits: (produits || []).find((p: any) => p.id === x.produit_id) })) })));
     setChargementDetail(false);
   };

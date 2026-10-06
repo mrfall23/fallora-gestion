@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { toutLire } from '@/lib/requetes';
 import { useUtilisateur, seDeconnecter } from '@/lib/utilisateur';
 import { FalloraLogo } from '../components/Logo';
 import { useIsMobile } from '../components/useMediaQuery';
@@ -89,12 +90,12 @@ export default function VendeusePage() {
     const n = new Date();
     const debutMois = new Date(n.getFullYear(), n.getMonth(), 1);
     const periode = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-01`;
-    const [{ data: obj }, { data: ventes }] = await Promise.all([
+    const [{ data: obj }, ventes] = await Promise.all([
       supabase.from('objectifs_vendeuses').select('objectif').eq('periode', periode).maybeSingle(),
-      supabase.from('ventes').select('total, date_vente').eq('annulee', false),
+      toutLire(() => supabase.from('ventes').select('id, total').eq('annulee', false).gte('date_vente', debutMois.toISOString()).order('id')),
     ]);
     setObjectifMois(Number(obj?.objectif) || 0);
-    setRealiseMois((ventes || []).filter((v: any) => new Date(v.date_vente) >= debutMois).reduce((s: number, v: any) => s + v.total, 0));
+    setRealiseMois(ventes.reduce((s: number, v: any) => s + v.total, 0));
   };
 
   const ajouterAuPanier = (produit: any) => {

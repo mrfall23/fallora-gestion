@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { toutLire, lireParIds } from '@/lib/requetes';
 import { useIsMobile } from '../../components/useMediaQuery';
 
 type Cliente = { id: number; nom: string; telephone: string | null; created_at: string; nbVentes: number; totalDepense: number; resteAPayer: number; derniereVisite: string | null };
@@ -34,10 +35,9 @@ export default function AdminClients() {
   useEffect(() => { chargerClientes(); }, []);
 
   const chargerClientes = async (): Promise<Cliente[]> => {
-    const { data: clientesData } = await supabase.from('clientes').select('*').order('nom');
-    if (!clientesData || clientesData.length === 0) { setClientes([]); setChargement(false); return []; }
-    const clienteIds = clientesData.map((c: any) => c.id);
-    const { data: ventes } = await supabase.from('ventes').select('id, cliente_id, total, reste_a_payer, date_vente').eq('annulee', false).in('cliente_id', clienteIds);
+    const clientesData = await toutLire(() => supabase.from('clientes').select('*').order('nom').order('id'));
+    if (clientesData.length === 0) { setClientes([]); setChargement(false); return []; }
+    const ventes = await toutLire(() => supabase.from('ventes').select('id, cliente_id, total, reste_a_payer, date_vente').eq('annulee', false).not('cliente_id', 'is', null).order('id'));
     const liste: Cliente[] = clientesData.map((c: any) => {
       const vv = (ventes || []).filter((v: any) => v.cliente_id === c.id);
       const dates = vv.map((v: any) => v.date_vente).sort().reverse();
@@ -50,14 +50,11 @@ export default function AdminClients() {
 
   const chargerVentesDetail = async (clienteId: number) => {
     setChargementDetail(true);
-    const { data: ventesData } = await supabase.from('ventes').select('*').eq('cliente_id', clienteId).eq('annulee', false).order('date_vente', { ascending: false });
-    if (!ventesData || ventesData.length === 0) { setVentesCliente([]); setChargementDetail(false); return; }
-    const venteIds = ventesData.map((v: any) => v.id);
-    const { data: vp } = await supabase.from('vente_produits').select('*').in('vente_id', venteIds);
-    const produitIds = [...new Set((vp || []).map((x: any) => x.produit_id))];
-    const { data: produits } = produitIds.length > 0 ? await supabase.from('produits').select('id, nom').in('id', produitIds) : { data: [] };
-    const userIds = [...new Set(ventesData.map((v: any) => v.vendeuse_id))];
-    const { data: utilisateurs } = userIds.length > 0 ? await supabase.from('utilisateurs').select('id, nom').in('id', userIds) : { data: [] };
+    const ventesData = await toutLire(() => supabase.from('ventes').select('*').eq('cliente_id', clienteId).eq('annulee', false).order('date_vente', { ascending: false }).order('id', { ascending: false }));
+    if (ventesData.length === 0) { setVentesCliente([]); setChargementDetail(false); return; }
+    const vp = await lireParIds('vente_produits', '*', 'vente_id', ventesData.map((v: any) => v.id));
+    const produits = await lireParIds('produits', 'id, nom', 'id', vp.map((x: any) => x.produit_id));
+    const utilisateurs = await lireParIds('utilisateurs', 'id, nom', 'id', ventesData.map((v: any) => v.vendeuse_id));
     setVentesCliente(ventesData.map((v: any) => ({ ...v, utilisateurs: (utilisateurs || []).find((u: any) => u.id === v.vendeuse_id) || null, vente_produits: (vp || []).filter((x: any) => x.vente_id === v.id).map((x: any) => ({ ...x, produits: (produits || []).find((p: any) => p.id === x.produit_id) || null })) })));
     setChargementDetail(false);
   };
