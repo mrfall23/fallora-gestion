@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { creerClientServeur } from '@/lib/supabase-server';
-import { notifierVente } from '@/lib/push';
+import { notifierVente, notifierStockBas } from '@/lib/push';
+import { SEUIL_STOCK_BAS } from '@/lib/constantes';
 
 // Enregistrement d'une vente, cote serveur, pour pouvoir notifier l'admin.
 //
@@ -66,6 +67,36 @@ export async function POST(request: Request) {
     }
   } catch (e) {
     console.error('Notification de vente echouee (sans impact sur la vente) :', e);
+  }
+
+  // ── Alerte stock bas (best-effort) ──
+  // On n'alerte qu'au FRANCHISSEMENT du seuil : le stock d'apres-vente est <=
+  // au seuil alors que le stock d'avant (apres + quantite vendue) etait > au
+  // seuil. Une seule alerte quand un produit y bascule, pas a chaque vente.
+  try {
+    const lignes: { produit_id: number; quantite: number }[] = Array.isArray(produits) ? produits : [];
+    if (lignes.length > 0) {
+      const admin = clientAdmin();
+      const ids = lignes.map(l => Number(l.produit_id));
+      const { data: prods } = await admin
+        .from('produits')
+        .select('id, nom, stock_restant')
+        .in('id', ids);
+
+      const franchis = (prods || [])
+        .map((p: any) => {
+          const vendu = lignes.filter(l => Number(l.produit_id) === p.id).reduce((s, l) => s + Number(l.quantite), 0);
+          const apres = Number(p.stock_restant);
+          const avant = apres + vendu;
+          return { nom: p.nom, stock: apres, franchi: avant > SEUIL_STOCK_BAS && apres <= SEUIL_STOCK_BAS };
+        })
+        .filter(p => p.franchi)
+        .map(({ nom, stock }) => ({ nom, stock }));
+
+      if (franchis.length > 0) await notifierStockBas(franchis);
+    }
+  } catch (e) {
+    console.error('Alerte stock bas echouee (sans impact sur la vente) :', e);
   }
 
   return NextResponse.json({ ok: true, id: venteId });

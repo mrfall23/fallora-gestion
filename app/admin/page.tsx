@@ -1,34 +1,57 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { SEUIL_STOCK_BAS } from '@/lib/constantes';
 
 const BADGE_UP = { fontSize: '12px', fontWeight: 700, color: 'var(--success)', background: 'var(--success-tint)', padding: '3px 9px', borderRadius: '8px' } as const;
 const BADGE_WARN = { fontSize: '12px', fontWeight: 700, color: 'var(--warn)', background: 'var(--warn-tint)', padding: '3px 9px', borderRadius: '8px' } as const;
 const BADGE_PAID = { fontSize: '12px', fontWeight: 700, color: 'var(--success)', background: 'var(--success-tint)', border: '1px solid var(--success-line)', padding: '5px 12px', borderRadius: '20px' } as const;
 const BADGE_PART = { fontSize: '12px', fontWeight: 700, color: 'var(--warn)', background: 'var(--warn-tint)', border: '1px solid var(--warn-line)', padding: '5px 12px', borderRadius: '20px' } as const;
 
+const MODE_LABELS: Record<string, string> = { cash: 'Espèces', mobile_money: 'Mobile Money', orange_money: 'Orange Money' };
+const moisLabel = () => new Date().toLocaleDateString('fr-FR', { month: 'long' });
+
+// Variation en % du mois courant vs mois precedent. null si pas de reference.
+function calculerDelta(courant: number, precedent: number): number | null {
+  if (precedent <= 0) return courant > 0 ? 100 : null;
+  return Math.round(((courant - precedent) / precedent) * 100);
+}
+
 export default function AdminDashboard() {
   const [stats, setStats] = useState({ totalVentes: 0, totalProduits: 0, stockRestant: 0, paiementsEnAttente: 0 });
   const [ventesRecentes, setVentesRecentes] = useState<any[]>([]);
   const [topVendeuses, setTopVendeuses] = useState<any[]>([]);
+  const [stockBas, setStockBas] = useState<any[]>([]);
+  const [comparatif, setComparatif] = useState({ caMois: 0, nbMois: 0, caMoisPrec: 0, nbMoisPrec: 0 });
+  const [caParMode, setCaParMode] = useState<{ mode: string; total: number }[]>([]);
+  const [produitsCa, setProduitsCa] = useState<{ nom: string; quantite: number; ca: number }[]>([]);
+  const [periode, setPeriode] = useState<{ id: number | null; nom: string; debut: string | null }>({ id: null, nom: 'Période en cours', debut: null });
+  const [clotureOuverte, setClotureOuverte] = useState(false);
+  const [nomPeriode, setNomPeriode] = useState('');
+  const [cloture, setCloture] = useState(false);
+  const [erreurCloture, setErreurCloture] = useState('');
 
   useEffect(() => {
     chargerStats();
+    chargerStockBas();
     const canal = supabase.channel('dashboard')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'ventes' }, () => chargerStats())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ventes' }, () => { chargerStats(); chargerStockBas(); })
       .subscribe();
     return () => { supabase.removeChannel(canal); };
   }, []);
 
-  // Chemin normal : une seule RPC, tout est agrege cote base.
+  // Produits actifs sous le seuil, du plus critique (epuise) au moins critique.
+  const chargerStockBas = async () => {
+    const { data } = await supabase.from('produits').select('id, nom, stock_restant').eq('actif', true).lte('stock_restant', SEUIL_STOCK_BAS).order('stock_restant', { ascending: true });
+    setStockBas(data || []);
+  };
+
+  // Une seule RPC, tout est agrege cote base (appliquee en prod).
   const chargerStats = async () => {
     const { data, error } = await supabase.rpc('tableau_de_bord_admin');
     if (error || !data) {
-      // Repli : la migration 20260805120000_tableau_de_bord_admin n'est
-      // peut-etre pas encore appliquee. On garde l'ancien calcul le temps du
-      // deploiement — a retirer une fois la RPC en place partout.
-      console.warn('RPC tableau_de_bord_admin indisponible, repli client-side.', error?.message);
-      return chargerStatsFallback();
+      console.warn('RPC tableau_de_bord_admin indisponible.', error?.message);
+      return;
     }
     const d = data as any;
     setStats({
@@ -44,45 +67,25 @@ export default function AdminDashboard() {
     setTopVendeuses((d.top_vendeuses || []).map((v: any) => ({
       id: v.id, nom: v.nom, nb: Number(v.nb) || 0, total: Number(v.total) || 0,
     })));
+    const c = d.comparatif || {};
+    setComparatif({
+      caMois: Number(c.ca_mois) || 0, nbMois: Number(c.nb_mois) || 0,
+      caMoisPrec: Number(c.ca_mois_prec) || 0, nbMoisPrec: Number(c.nb_mois_prec) || 0,
+    });
+    setCaParMode((d.ca_par_mode || []).map((m: any) => ({ mode: m.mode, total: Number(m.total) || 0 })));
+    setProduitsCa((d.produits_ca || []).map((p: any) => ({ nom: p.nom, quantite: Number(p.quantite) || 0, ca: Number(p.ca) || 0 })));
+    const pr = d.periode || {};
+    setPeriode({ id: pr.id ?? null, nom: pr.nom || 'Période en cours', debut: pr.debut || null });
   };
 
-  // Ancien calcul (repli). Rapatrie toutes les ventes dans le navigateur.
-  const chargerStatsFallback = async () => {
-    const { data: ventes } = await supabase.from('ventes').select('id, total, reste_a_payer, montant_paye, vendeuse_id, cliente_id, date_vente, statut_paiement').eq('annulee', false).order('date_vente', { ascending: false });
-    const venteIds = (ventes || []).map((v: any) => v.id);
-    const { data: venteProduits } = venteIds.length > 0 ? await supabase.from('vente_produits').select('quantite, vente_id').in('vente_id', venteIds) : { data: [] };
-    const { data: produits } = await supabase.from('produits').select('stock_restant');
-    const clienteIds = [...new Set((ventes || []).map((v: any) => v.cliente_id).filter(Boolean))];
-    const { data: clientes } = clienteIds.length > 0 ? await supabase.from('clientes').select('id, nom').in('id', clienteIds) : { data: [] };
-    const userIds = [...new Set((ventes || []).map((v: any) => v.vendeuse_id).filter(Boolean))];
-    const { data: utilisateurs } = userIds.length > 0 ? await supabase.from('utilisateurs').select('id, nom').in('id', userIds) : { data: [] };
-
-    setStats({
-      totalVentes: (ventes || []).reduce((s: number, v: any) => s + v.total, 0),
-      totalProduits: (venteProduits || []).reduce((s: number, vp: any) => s + vp.quantite, 0),
-      stockRestant: (produits || []).reduce((s: number, p: any) => s + p.stock_restant, 0),
-      paiementsEnAttente: (ventes || []).reduce((s: number, v: any) => s + v.reste_a_payer, 0),
-    });
-
-    const recentes = (ventes || []).slice(0, 5).map((v: any) => ({
-      ...v,
-      clienteNom: (clientes || []).find((c: any) => c.id === v.cliente_id)?.nom || 'Inconnue',
-      vendeuseNom: (utilisateurs || []).find((u: any) => u.id === v.vendeuse_id)?.nom || 'Inconnue',
-    }));
-    setVentesRecentes(recentes);
-
-    const vendeusesMap: any = {};
-    (ventes || []).forEach((v: any) => {
-      if (!v.vendeuse_id) return;
-      if (!vendeusesMap[v.vendeuse_id]) vendeusesMap[v.vendeuse_id] = { total: 0, nb: 0 };
-      vendeusesMap[v.vendeuse_id].total += v.total;
-      vendeusesMap[v.vendeuse_id].nb += 1;
-    });
-    const top = Object.entries(vendeusesMap)
-      .map(([id, s]: any) => ({ id: Number(id), ...s, nom: (utilisateurs || []).find((u: any) => u.id === Number(id))?.nom || 'Inconnue' }))
-      .sort((a: any, b: any) => b.total - a.total)
-      .slice(0, 3);
-    setTopVendeuses(top);
+  // Cloture : archive la periode en cours et repart a zero (rien n'est supprime).
+  const cloturerPeriode = async () => {
+    setCloture(true); setErreurCloture('');
+    const { error } = await supabase.rpc('cloturer_periode', { p_nom: nomPeriode.trim() || null });
+    setCloture(false);
+    if (error) { setErreurCloture(error.message || 'Échec de la clôture.'); return; }
+    setClotureOuverte(false); setNomPeriode('');
+    chargerStats(); chargerStockBas();
   };
 
   const STATS_CARDS = [
@@ -100,6 +103,23 @@ export default function AdminDashboard() {
 
   return (
     <div className="fade-up">
+      {/* Période en cours + clôture (remise à zéro non destructive) */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', marginBottom: '20px', padding: '14px 18px', borderRadius: '16px', background: 'var(--surface)', border: '1px solid var(--accent-12)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '11px', minWidth: 0 }}>
+          <span className="ms" style={{ fontSize: '22px', color: 'var(--accent)' }}>event_available</span>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '.4px', color: 'var(--ink-55)', textTransform: 'uppercase' }}>Période en cours</div>
+            <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {periode.nom}{periode.debut ? ` · depuis le ${new Date(periode.debut).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}` : ''}
+            </div>
+          </div>
+        </div>
+        <button onClick={() => { setErreurCloture(''); setNomPeriode(periode.nom === 'Période en cours' ? '' : periode.nom); setClotureOuverte(true); }}
+          style={{ display: 'flex', alignItems: 'center', gap: '7px', height: '42px', padding: '0 16px', borderRadius: '12px', cursor: 'pointer', fontSize: '13.5px', fontWeight: 700, background: 'var(--warn-tint)', color: 'var(--warn)', border: '1px solid var(--warn-line)', whiteSpace: 'nowrap' }}>
+          <span className="ms" style={{ fontSize: '18px' }}>restart_alt</span>Clôturer & remettre à 0
+        </button>
+      </div>
+
       {/* Stats cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(224px,1fr))', gap: '18px', marginBottom: '24px' }}>
         {STATS_CARDS.map(s => (
@@ -118,6 +138,59 @@ export default function AdminDashboard() {
           </div>
         ))}
       </div>
+
+      {/* Ce mois-ci — comparatif vs mois précédent */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: '18px', marginBottom: '24px' }}>
+        {[
+          { label: `Chiffre d'affaires — ${moisLabel()}`, unit: 'FCFA', courant: comparatif.caMois, precedent: comparatif.caMoisPrec },
+          { label: `Ventes — ${moisLabel()}`, unit: 'ventes', courant: comparatif.nbMois, precedent: comparatif.nbMoisPrec },
+        ].map(s => {
+          const delta = calculerDelta(s.courant, s.precedent);
+          const positif = delta !== null && delta >= 0;
+          return (
+            <div key={s.label} style={{ padding: '22px', borderRadius: '20px', background: 'var(--surface)', border: '1px solid var(--accent-12)', backdropFilter: 'blur(20px)', boxShadow: 'var(--shadow-md)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', gap: '10px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, letterSpacing: '.4px', color: 'var(--ink-55)', textTransform: 'uppercase' }}>{s.label}</span>
+                {delta !== null && (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', fontSize: '12px', fontWeight: 700, color: positif ? 'var(--success)' : 'var(--danger)', background: positif ? 'var(--success-tint)' : 'var(--danger-tint)', padding: '3px 9px', borderRadius: '20px' }}>
+                    <span className="ms" style={{ fontSize: '15px' }}>{positif ? 'trending_up' : 'trending_down'}</span>{positif ? '+' : ''}{delta}%
+                  </span>
+                )}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '7px' }}>
+                <span style={{ fontSize: '28px', fontWeight: 800, color: 'var(--ink)', letterSpacing: '-.5px' }}>{s.courant.toLocaleString()}</span>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--accent)' }}>{s.unit}</span>
+              </div>
+              <div style={{ marginTop: '4px', fontSize: '12px', color: 'var(--ink-45)' }}>Mois précédent : {s.precedent.toLocaleString()} {s.unit}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* À réapprovisionner */}
+      {stockBas.length > 0 && (
+        <div style={{ marginBottom: '24px', padding: '20px 24px', borderRadius: '20px', background: 'var(--warn-tint)', border: '1px solid var(--warn-line)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', gap: '12px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span className="ms" style={{ fontSize: '22px', color: 'var(--warn)' }}>inventory_2</span>
+              <span style={{ fontSize: '16px', fontWeight: 700, color: 'var(--ink)' }}>À réapprovisionner</span>
+              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--warn)', background: 'var(--surface)', border: '1px solid var(--warn-line)', padding: '2px 9px', borderRadius: '20px' }}>{stockBas.length}</span>
+            </div>
+            <a href="/admin/produits" style={{ fontSize: '13px', color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>Gérer le stock</a>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+            {stockBas.map(p => {
+              const epuise = p.stock_restant <= 0;
+              return (
+                <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 12px', borderRadius: '12px', background: 'var(--surface)', border: `1px solid ${epuise ? 'var(--danger-line)' : 'var(--warn-line)'}` }}>
+                  <span style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--ink)' }}>{p.nom}</span>
+                  <span style={{ fontSize: '11.5px', fontWeight: 700, color: epuise ? 'var(--danger)' : 'var(--warn)', background: epuise ? 'var(--danger-tint)' : 'var(--warn-tint)', padding: '2px 8px', borderRadius: '20px' }}>{epuise ? 'Épuisé' : `${p.stock_restant} restant`}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Bottom panels */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))', gap: '18px' }}>
@@ -178,7 +251,94 @@ export default function AdminDashboard() {
             })}
           </div>
         </div>
+
+        {/* CA par mode de paiement */}
+        <div style={{ padding: '24px', borderRadius: '20px', background: 'var(--surface)', border: '1px solid var(--line)', backdropFilter: 'blur(20px)' }}>
+          <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--ink)', marginBottom: '18px' }}>Encaissements par mode</div>
+          {caParMode.length === 0 ? (
+            <p style={{ color: 'var(--ink-45)', fontSize: '13px', textAlign: 'center', padding: '20px 0' }}>Aucun encaissement.</p>
+          ) : (() => {
+            const totalMode = caParMode.reduce((s, m) => s + m.total, 0) || 1;
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {caParMode.map(m => {
+                  const pct = Math.round((m.total / totalMode) * 100);
+                  return (
+                    <div key={m.mode}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '6px' }}>
+                        <span style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--ink)' }}>{MODE_LABELS[m.mode] || m.mode}</span>
+                        <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--ink)' }}>{m.total.toLocaleString()} <span style={{ fontSize: '11px', color: 'var(--accent)' }}>FCFA</span> <span style={{ fontSize: '11.5px', color: 'var(--ink-45)' }}>· {pct}%</span></span>
+                      </div>
+                      <div style={{ height: '8px', borderRadius: '20px', background: 'var(--surface-inset)', overflow: 'hidden' }}>
+                        <div style={{ width: `${pct}%`, height: '100%', borderRadius: '20px', background: 'var(--accent)' }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </div>
+
+        {/* Top produits par chiffre d'affaires */}
+        <div style={{ padding: '24px', borderRadius: '20px', background: 'var(--surface)', border: '1px solid var(--line)', backdropFilter: 'blur(20px)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px' }}>
+            <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--ink)' }}>Produits les plus rentables</div>
+            <a href="/admin/rapports" style={{ fontSize: '13px', color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>Rapports</a>
+          </div>
+          {produitsCa.length === 0 ? (
+            <p style={{ color: 'var(--ink-45)', fontSize: '13px', textAlign: 'center', padding: '20px 0' }}>Aucune donnée.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {produitsCa.map((p, i) => (
+                <div key={p.nom} style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '11px 8px', borderRadius: '12px' }}>
+                  <div style={{ width: '28px', height: '28px', borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--accent-12)', border: '1px solid var(--accent-20)', flexShrink: 0 }}>
+                    <span style={{ fontSize: '13px', fontWeight: 800, color: 'var(--accent)' }}>{i + 1}</span>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nom}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--ink-45)' }}>{p.quantite} vendu{p.quantite > 1 ? 's' : ''}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--accent)' }}>{p.ca.toLocaleString()}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--ink-45)' }}>FCFA</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* Modal de clôture */}
+      {clotureOuverte && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(62,44,32,.55)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+          <div style={{ width: '100%', maxWidth: '440px', borderRadius: '22px', background: 'var(--surface-2)', border: '1px solid var(--accent-20)', boxShadow: 'var(--shadow-lg)', overflow: 'hidden' }}>
+            <div style={{ padding: '22px 24px 0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '11px', marginBottom: '14px' }}>
+                <div style={{ width: '44px', height: '44px', borderRadius: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--warn-tint)', border: '1px solid var(--warn-line)' }}>
+                  <span className="ms" style={{ fontSize: '23px', color: 'var(--warn)' }}>restart_alt</span>
+                </div>
+                <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--ink)' }}>Clôturer la période</div>
+              </div>
+              <p style={{ fontSize: '13.5px', lineHeight: 1.55, color: 'var(--ink-70)', margin: '0 0 8px' }}>
+                Les compteurs du tableau de bord repartent à <strong>zéro</strong> pour la prochaine vente privée. <strong>Rien n'est supprimé</strong> : cette période reste consultable dans le calendrier, et les dettes clientes restent dues.
+              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12.5px', color: 'var(--accent-deep)', background: 'var(--accent-08)', border: '1px solid var(--accent-20)', borderRadius: '11px', padding: '9px 12px', margin: '0 0 16px' }}>
+                <span className="ms" style={{ fontSize: '17px', color: 'var(--accent)' }}>lightbulb</span>
+                Pense à <a href="/admin/rapports" style={{ color: 'var(--accent-deep)', fontWeight: 700 }}>télécharger le rapport</a> avant de clôturer.
+              </div>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--ink-55)', marginBottom: '6px' }}>Nom de cette période (pour le calendrier)</label>
+              <input value={nomPeriode} onChange={e => setNomPeriode(e.target.value)} placeholder="Ex : Vente privée septembre" style={{ width: '100%', height: '44px', padding: '0 14px', borderRadius: '12px', background: 'var(--surface-inset)', border: '1px solid var(--line)', outline: 'none', color: 'var(--ink)', fontSize: '14px' }} />
+              {erreurCloture && <div style={{ fontSize: '12.5px', color: 'var(--danger)', marginTop: '8px' }}>{erreurCloture}</div>}
+            </div>
+            <div style={{ display: 'flex', gap: '10px', padding: '20px 24px 24px' }}>
+              <button onClick={() => setClotureOuverte(false)} disabled={cloture} style={{ flex: 1, height: '46px', borderRadius: '13px', cursor: 'pointer', fontSize: '14px', fontWeight: 600, background: 'var(--surface)', color: 'var(--ink-55)', border: '1px solid var(--line)' }}>Annuler</button>
+              <button onClick={cloturerPeriode} disabled={cloture} style={{ flex: 1, height: '46px', borderRadius: '13px', cursor: cloture ? 'default' : 'pointer', fontSize: '14px', fontWeight: 700, background: 'var(--warn)', color: '#fff', border: 'none', opacity: cloture ? 0.6 : 1 }}>{cloture ? 'Clôture…' : 'Clôturer & remettre à 0'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

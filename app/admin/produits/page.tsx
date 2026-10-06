@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { SEUIL_STOCK_BAS } from '@/lib/constantes';
 
 type Produit = { id: number; nom: string; prix: number; description: string; stock_restant: number; stock_initial: number; image: string | null };
 const FORM_VIDE: Omit<Produit, 'id'> = { nom: '', prix: 0, description: '', stock_restant: 0, stock_initial: 0, image: null };
@@ -49,7 +50,7 @@ export default function AdminProduits() {
 
   const stockBadge = (p: Produit) => {
     if (p.stock_restant === 0) return { text: 'Épuisé', style: { fontSize: '12px', fontWeight: 700, color: 'var(--danger)', background: 'var(--danger-tint)', border: '1px solid var(--danger-line)', padding: '5px 12px', borderRadius: '20px' } };
-    if (p.stock_restant <= 5) return { text: `${p.stock_restant} en stock`, style: { fontSize: '12px', fontWeight: 700, color: 'var(--warn)', background: 'var(--warn-tint)', border: '1px solid var(--warn-line)', padding: '5px 12px', borderRadius: '20px' } };
+    if (p.stock_restant <= SEUIL_STOCK_BAS) return { text: `${p.stock_restant} en stock`, style: { fontSize: '12px', fontWeight: 700, color: 'var(--warn)', background: 'var(--warn-tint)', border: '1px solid var(--warn-line)', padding: '5px 12px', borderRadius: '20px' } };
     return { text: `${p.stock_restant} en stock`, style: { fontSize: '12px', fontWeight: 700, color: 'var(--ink-70)', background: 'var(--surface-inset)', border: '1px solid var(--line)', padding: '5px 12px', borderRadius: '20px' } };
   };
 

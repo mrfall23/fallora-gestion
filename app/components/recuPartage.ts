@@ -1,4 +1,4 @@
-import { toBlob } from 'html-to-image';
+import { toBlob, toPng } from 'html-to-image';
 import type { RecuData } from './Recu';
 
 const MODE: Record<string, string> = { cash: 'Espèces', mobile_money: 'Mobile Money', orange_money: 'Orange Money' };
@@ -45,6 +45,36 @@ export async function partagerImageRecu(node: HTMLElement, d: RecuData): Promise
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
   return 'telecharge';
+}
+
+/**
+ * Genere le reçu en PDF (une page a la taille exacte du reçu) et declenche le
+ * telechargement. Reutilise le meme rendu image que le partage, embarque dans
+ * un PDF via jsPDF. Repli : false si la capture echoue.
+ */
+export async function telechargerPdfRecu(node: HTMLElement, d: RecuData): Promise<boolean> {
+  let dataUrl: string;
+  try {
+    dataUrl = await toPng(node, { pixelRatio: 2, backgroundColor: '#FBF7EF', cacheBust: true });
+  } catch {
+    return false;
+  }
+
+  // On lit les dimensions reelles de l'image pour dimensionner la page PDF.
+  const img = new Image();
+  try {
+    await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = rej; img.src = dataUrl; });
+  } catch {
+    return false;
+  }
+
+  const largeur = img.naturalWidth || img.width;
+  const hauteur = img.naturalHeight || img.height;
+  const { jsPDF } = await import('jspdf'); // charge la lib seulement au clic
+  const pdf = new jsPDF({ unit: 'px', format: [largeur, hauteur], orientation: hauteur >= largeur ? 'portrait' : 'landscape' });
+  pdf.addImage(dataUrl, 'PNG', 0, 0, largeur, hauteur);
+  pdf.save(`recu-${d.numero}.pdf`);
+  return true;
 }
 
 /** Envoie WhatsApp en TEXTE, pre-rempli au numero du client si dispo. */

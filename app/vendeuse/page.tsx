@@ -6,7 +6,8 @@ import { useUtilisateur, seDeconnecter } from '@/lib/utilisateur';
 import { FalloraLogo } from '../components/Logo';
 import { useIsMobile } from '../components/useMediaQuery';
 import Recu, { type RecuData } from '../components/Recu';
-import { partagerImageRecu, whatsappTexte } from '../components/recuPartage';
+import { partagerImageRecu, whatsappTexte, telechargerPdfRecu } from '../components/recuPartage';
+import { lireFile, ecrireFile, ajouterAFile, nouvelId, type PayloadVente } from '@/lib/fileHorsLigne';
 
 const inputStyle: React.CSSProperties = { height: '44px', padding: '0 14px', borderRadius: '12px', background: 'var(--surface-inset)', border: '1px solid var(--line)', outline: 'none', color: 'var(--ink)', fontSize: '14px', width: '100%' };
 
@@ -24,16 +25,76 @@ export default function VendeusePage() {
   const [succes, setSucces] = useState('');
   const [erreur, setErreur] = useState('');
   const [recu, setRecu] = useState<RecuData | null>(null);
+  const [objectifMois, setObjectifMois] = useState(0);
+  const [realiseMois, setRealiseMois] = useState(0);
+  const [enLigne, setEnLigne] = useState(true);
+  const [nbEnAttente, setNbEnAttente] = useState(0);
+  const [synchro, setSynchro] = useState(false);
   const recuRef = useRef<HTMLDivElement>(null);
+  const syncRef = useRef(false); // garde anti double-synchronisation (concurrence)
   const router = useRouter();
 
   // La redirection si non connecte est prise en charge par useUtilisateur().
-  useEffect(() => { chargerProduits(); }, []);
+  useEffect(() => {
+    chargerProduits(); chargerObjectif();
+    setEnLigne(navigator.onLine);
+    setNbEnAttente(lireFile().length);
+    const auRetour = () => { setEnLigne(true); synchroniser(); };
+    const aLaPerte = () => setEnLigne(false);
+    window.addEventListener('online', auRetour);
+    window.addEventListener('offline', aLaPerte);
+    synchroniser(); // depile d'eventuelles ventes en attente d'une session precedente
+    return () => { window.removeEventListener('online', auRetour); window.removeEventListener('offline', aLaPerte); };
+  }, []);
+
+  // Depile la file locale vers /api/ventes. Garde en file uniquement ce qui
+  // echoue par RESEAU ; ce qui est refuse par la base (stock parti...) est
+  // retire et signale a la vendeuse. Best-effort, jamais bloquant.
+  const synchroniser = async () => {
+    if (syncRef.current || !navigator.onLine) return;
+    const file = lireFile();
+    if (file.length === 0) return;
+    syncRef.current = true; setSynchro(true);
+    const restants: typeof file = [];
+    const refuses: string[] = [];
+    try {
+      for (const item of file) {
+        try {
+          const rep = await fetch('/api/ventes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item.payload) });
+          if (rep.ok) continue; // envoyee -> on la sort de la file
+          const r = await rep.json().catch(() => ({}));
+          refuses.push(`${item.apercu.cliente} : ${r.message || 'refusée'}`);
+        } catch {
+          restants.push(item); // reseau encore coupe -> on la garde
+        }
+      }
+      ecrireFile(restants);
+      setNbEnAttente(restants.length);
+      if (refuses.length > 0) setErreur(`${refuses.length} vente(s) hors ligne non enregistrée(s) — ${refuses.join(' ; ')}`);
+      await chargerProduits();
+      chargerObjectif();
+    } finally {
+      syncRef.current = false; setSynchro(false);
+    }
+  };
 
   const chargerProduits = async () => {
     const { data } = await supabase.from('produits').select('*').order('nom');
     setProduits(data || []);
     setChargement(false);
+  };
+
+  // Objectif du mois de la vendeuse + son realise (RLS : ne renvoie que les siens).
+  const chargerObjectif = async () => {
+    const n = new Date();
+    const debutMois = new Date(n.getFullYear(), n.getMonth(), 1);
+    const periode = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-01`;
+    const [{ data: obj }, { data: ventes }] = await Promise.all([
+      supabase.from('objectifs_vendeuses').select('objectif').eq('periode', periode).maybeSingle(),
+      supabase.from('ventes').select('total, date_vente').eq('annulee', false),
+    ]);
+    setObjectifMois(Number(obj?.objectif) || 0);
+    setRealiseMois((ventes || []).filter((v: any) => new Date(v.date_vente) >= debutMois).reduce((s: number, v: any) => s + v.total, 0));
   };
 
   const ajouterAuPanier = (produit: any) => {
@@ -71,7 +132,19 @@ export default function VendeusePage() {
     if (panier.length === 0) { setErreur('Ajoutez des produits au panier.'); return; }
     if (!cliente.nom.trim()) { setErreur('Entrez le nom de la cliente.'); return; }
     if (statutPaiement === 'partiel' && (!montantPaye || montantPayeNum <= 0)) { setErreur('Entrez le montant payé.'); return; }
+    const payload: PayloadVente = {
+      cliente_nom: cliente.nom,
+      cliente_telephone: cliente.telephone || null,
+      produits: panier.map(p => ({ produit_id: p.id, quantite: p.quantite })),
+      statut_paiement: statutPaiement,
+      montant_paye: statutPaiement === 'paye' ? null : montantPayeNum,
+      mode_paiement: modePaiement,
+    };
     setErreur(''); setEnregistrement(true);
+
+    // Hors ligne : on met la vente en file d'attente locale, envoi auto au retour.
+    if (!navigator.onLine) { mettreEnFile(payload); setEnregistrement(false); return; }
+
     try {
       // Passe par /api/ventes : la meme RPC enregistrer_vente() est appelee cote
       // serveur (vente identique, atomique, stock verrouille), puis l'admin est
@@ -79,14 +152,7 @@ export default function VendeusePage() {
       const reponse = await fetch('/api/ventes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cliente_nom: cliente.nom,
-          cliente_telephone: cliente.telephone || null,
-          produits: panier.map(p => ({ produit_id: p.id, quantite: p.quantite })),
-          statut_paiement: statutPaiement,
-          montant_paye: statutPaiement === 'paye' ? null : montantPayeNum,
-          mode_paiement: modePaiement,
-        }),
+        body: JSON.stringify(payload),
       });
       const resultat = await reponse.json().catch(() => ({}));
 
@@ -116,9 +182,27 @@ export default function VendeusePage() {
       setSucces('Vente enregistrée avec succès !');
       setPanier([]); setCliente({ nom: '', telephone: '' }); setMontantPaye(''); setStatutPaiement('paye'); setModePaiement('cash');
       await chargerProduits();
+      chargerObjectif();
       setTimeout(() => setSucces(''), 4000);
-    } catch { setErreur('Erreur inattendue. Veuillez réessayer.'); }
-    finally { setEnregistrement(false); }
+    } catch {
+      // Echec RESEAU (fetch a jete) : on bascule en file d'attente plutot que
+      // de perdre la vente. Une vraie erreur metier passe par !reponse.ok ci-dessus.
+      mettreEnFile(payload);
+    } finally { setEnregistrement(false); }
+  };
+
+  // Met une vente en file locale + decrement optimiste du stock affiche (pour
+  // eviter la survente tant qu'on est hors ligne). Vide le panier.
+  const mettreEnFile = (payload: PayloadVente) => {
+    const file = ajouterAFile({ id: nouvelId(), payload, apercu: { cliente: cliente.nom.trim(), total, date: new Date().toISOString() } });
+    setNbEnAttente(file.length);
+    setProduits(prev => prev.map(p => {
+      const ligne = panier.find(x => x.id === p.id);
+      return ligne ? { ...p, stock_restant: Math.max(0, p.stock_restant - ligne.quantite) } : p;
+    }));
+    setSucces('Vente enregistrée hors ligne — envoi automatique au retour du réseau.');
+    setPanier([]); setCliente({ nom: '', telephone: '' }); setMontantPaye(''); setStatutPaiement('paye'); setModePaiement('cash');
+    setTimeout(() => setSucces(''), 5000);
   };
 
   return (
@@ -140,6 +224,50 @@ export default function VendeusePage() {
           </button>
         </div>
       </header>
+
+      {(!enLigne || nbEnAttente > 0) && (
+        <div style={{ maxWidth: '1400px', margin: '0 auto', padding: isMobile ? '14px 16px 0' : '20px 32px 0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', padding: '12px 16px', borderRadius: '14px', background: enLigne ? 'var(--warn-tint)' : 'var(--surface-inset)', border: `1px solid ${enLigne ? 'var(--warn-line)' : 'var(--line)'}` }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '9px', fontSize: '13.5px', fontWeight: 600, color: 'var(--ink)' }}>
+              <span className="ms" style={{ fontSize: '19px', color: enLigne ? 'var(--warn)' : 'var(--ink-45)' }}>{enLigne ? 'cloud_upload' : 'cloud_off'}</span>
+              {!enLigne
+                ? <span>Hors ligne — les ventes sont enregistrées et seront envoyées au retour du réseau.{nbEnAttente > 0 ? ` (${nbEnAttente} en attente)` : ''}</span>
+                : <span>{nbEnAttente} vente{nbEnAttente > 1 ? 's' : ''} en attente d'envoi.</span>}
+            </div>
+            {enLigne && nbEnAttente > 0 && (
+              <button onClick={synchroniser} disabled={synchro} style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '38px', padding: '0 16px', borderRadius: '10px', cursor: synchro ? 'default' : 'pointer', fontSize: '13px', fontWeight: 700, background: 'var(--accent)', color: 'var(--on-accent)', border: 'none', opacity: synchro ? 0.6 : 1 }}>
+                <span className="ms" style={{ fontSize: '17px' }}>sync</span>{synchro ? 'Envoi…' : 'Synchroniser'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {objectifMois > 0 && (() => {
+        const pct = Math.min(100, Math.round((realiseMois / objectifMois) * 100));
+        const atteint = realiseMois >= objectifMois;
+        const reste = Math.max(0, objectifMois - realiseMois);
+        const mois = new Date().toLocaleDateString('fr-FR', { month: 'long' });
+        return (
+          <div style={{ maxWidth: '1400px', margin: '0 auto', padding: isMobile ? '14px 16px 0' : '20px 32px 0' }}>
+            <div style={{ padding: isMobile ? '14px 16px' : '16px 20px', borderRadius: '16px', background: atteint ? 'var(--success-tint)' : 'var(--surface)', border: `1px solid ${atteint ? 'var(--success-line)' : 'var(--accent-20)'}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '9px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 700, color: 'var(--ink)' }}>
+                  <span className="ms" style={{ fontSize: '19px', color: atteint ? 'var(--success)' : 'var(--accent)' }}>flag</span>Mon objectif de {mois}
+                </div>
+                <div style={{ fontSize: '13.5px', color: 'var(--ink-70)' }}>
+                  <b style={{ color: 'var(--ink)' }}>{realiseMois.toLocaleString()}</b> / {objectifMois.toLocaleString()} FCFA
+                  <span style={{ marginLeft: '8px', fontWeight: 700, color: atteint ? 'var(--success)' : 'var(--accent)' }}>{pct}%</span>
+                </div>
+              </div>
+              <div style={{ height: '10px', borderRadius: '20px', background: 'var(--surface-inset)', overflow: 'hidden' }}>
+                <div style={{ width: `${pct}%`, height: '100%', borderRadius: '20px', background: atteint ? 'var(--success)' : 'var(--accent-grad)' }} />
+              </div>
+              <div style={{ fontSize: '12.5px', color: atteint ? 'var(--success)' : 'var(--ink-45)', fontWeight: 600, marginTop: '7px' }}>{atteint ? '🎯 Objectif atteint, bravo !' : `Encore ${reste.toLocaleString()} FCFA pour atteindre l'objectif`}</div>
+            </div>
+          </div>
+        );
+      })()}
 
       {chargement ? (
         <div style={{ textAlign: 'center', padding: '80px', color: 'var(--ink-45)' }}>Chargement des produits...</div>
@@ -302,10 +430,16 @@ export default function VendeusePage() {
               style={{ height: '52px', border: 'none', borderRadius: '14px', cursor: 'pointer', background: 'var(--accent-grad)', color: 'var(--on-accent)', fontSize: '15px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '9px', boxShadow: 'var(--shadow-accent)' }}>
               <span className="ms" style={{ fontSize: '20px' }}>ios_share</span>Partager le reçu (WhatsApp)
             </button>
-            <button onClick={() => whatsappTexte(recu)}
-              style={{ height: '46px', border: '1px solid var(--accent-25)', borderRadius: '13px', cursor: 'pointer', background: 'var(--surface)', color: 'var(--accent-deep)', fontSize: '13.5px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-              <span className="ms" style={{ fontSize: '18px' }}>chat</span>Envoyer en texte
-            </button>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button onClick={() => whatsappTexte(recu)}
+                style={{ flex: 1, height: '46px', border: '1px solid var(--accent-25)', borderRadius: '13px', cursor: 'pointer', background: 'var(--surface)', color: 'var(--accent-deep)', fontSize: '13.5px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                <span className="ms" style={{ fontSize: '18px' }}>chat</span>Texte
+              </button>
+              <button onClick={async () => { if (recuRef.current) { const ok = await telechargerPdfRecu(recuRef.current, recu); if (!ok) setErreur('Échec de la génération du PDF.'); } }}
+                style={{ flex: 1, height: '46px', border: '1px solid var(--accent-25)', borderRadius: '13px', cursor: 'pointer', background: 'var(--surface)', color: 'var(--accent-deep)', fontSize: '13.5px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                <span className="ms" style={{ fontSize: '18px' }}>picture_as_pdf</span>PDF
+              </button>
+            </div>
             <button onClick={() => setRecu(null)}
               style={{ height: '46px', border: '1px solid var(--line)', borderRadius: '13px', cursor: 'pointer', background: 'transparent', color: 'var(--ink-55)', fontSize: '14px', fontWeight: 600 }}>
               Nouvelle vente

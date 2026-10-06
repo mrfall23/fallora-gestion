@@ -11,12 +11,20 @@ const MEDALS = [
 const BADGE_PAID = { fontSize: '12px', fontWeight: 700, color: 'var(--success)', background: 'var(--success-tint)', border: '1px solid var(--success-line)', padding: '4px 10px', borderRadius: '20px' } as const;
 const BADGE_PART = { fontSize: '12px', fontWeight: 700, color: 'var(--warn)', background: 'var(--warn-tint)', border: '1px solid var(--warn-line)', padding: '4px 10px', borderRadius: '20px' } as const;
 
+// Bornes du mois courant (heure locale du navigateur = heure Cameroun).
+const debutMoisCourant = () => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), 1); };
+const periodeCourante = () => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-01`; };
+const nomDuMois = () => new Date().toLocaleDateString('fr-FR', { month: 'long' });
+
 export default function AdminVendeuses() {
   const [vendeuses, setVendeuses] = useState<any[]>([]);
   const [chargement, setChargement] = useState(true);
   const [detailOuvert, setDetailOuvert] = useState<number | null>(null);
   const [ventesDetail, setVentesDetail] = useState<any[]>([]);
   const [chargementDetail, setChargementDetail] = useState(false);
+  const [objectifEdite, setObjectifEdite] = useState<number | null>(null);
+  const [valeurObjectif, setValeurObjectif] = useState('');
+  const [sauvegardeObj, setSauvegardeObj] = useState(false);
 
   useEffect(() => {
     chargerVendeuses();
@@ -27,15 +35,28 @@ export default function AdminVendeuses() {
   const chargerVendeuses = async () => {
     const { data: utilisateurs } = await supabase.from('utilisateurs').select('*').eq('role', 'vendeuse').eq('actif', true);
     const { data: ventes } = await supabase.from('ventes').select('*').eq('annulee', false);
+    const { data: objectifs } = await supabase.from('objectifs_vendeuses').select('vendeuse_id, objectif').eq('periode', periodeCourante());
+    const debutMois = debutMoisCourant();
     const venteIds = (ventes || []).map((v: any) => v.id);
     const { data: venteProduits } = venteIds.length > 0 ? await supabase.from('vente_produits').select('vente_id, quantite').in('vente_id', venteIds) : { data: [] };
     const result = (utilisateurs || []).map((u: any) => {
       const vv = (ventes || []).filter((v: any) => v.vendeuse_id === u.id);
       const ids = vv.map((v: any) => v.id);
-      return { ...u, totalVentes: vv.reduce((s: number, v: any) => s + v.total, 0), totalEncaisse: vv.reduce((s: number, v: any) => s + v.montant_paye, 0), nbVentes: vv.length, nbProduits: (venteProduits || []).filter((vp: any) => ids.includes(vp.vente_id)).reduce((s: number, vp: any) => s + vp.quantite, 0) };
+      const realiseMois = vv.filter((v: any) => new Date(v.date_vente) >= debutMois).reduce((s: number, v: any) => s + v.total, 0);
+      const objectif = Number((objectifs || []).find((o: any) => o.vendeuse_id === u.id)?.objectif) || 0;
+      return { ...u, totalVentes: vv.reduce((s: number, v: any) => s + v.total, 0), totalEncaisse: vv.reduce((s: number, v: any) => s + v.montant_paye, 0), nbVentes: vv.length, nbProduits: (venteProduits || []).filter((vp: any) => ids.includes(vp.vente_id)).reduce((s: number, vp: any) => s + vp.quantite, 0), realiseMois, objectif };
     }).sort((a: any, b: any) => b.totalVentes - a.totalVentes);
     setVendeuses(result);
     setChargement(false);
+  };
+
+  const enregistrerObjectif = async (vendeuseId: number) => {
+    setSauvegardeObj(true);
+    const objectif = Math.max(0, Number(valeurObjectif) || 0);
+    await supabase.from('objectifs_vendeuses').upsert({ vendeuse_id: vendeuseId, periode: periodeCourante(), objectif }, { onConflict: 'vendeuse_id,periode' });
+    setSauvegardeObj(false);
+    setObjectifEdite(null);
+    await chargerVendeuses();
   };
 
   const voirDetail = async (vendeuseId: number) => {
@@ -92,7 +113,21 @@ export default function AdminVendeuses() {
             <div key={v.id}>
               <div style={{ display: 'grid', gridTemplateColumns: '60px 1.6fr 1fr 1fr 1fr 60px', gap: '16px', padding: '15px 24px', borderBottom: '1px solid var(--line-soft)', alignItems: 'center', minWidth: '640px' }}>
                 <div><span style={rankStyle as any}>{i + 1}</span></div>
-                <div style={{ fontSize: '14.5px', fontWeight: 600, color: 'var(--ink)' }}>{v.nom}</div>
+                <div>
+                  <div style={{ fontSize: '14.5px', fontWeight: 600, color: 'var(--ink)' }}>{v.nom}</div>
+                  {v.objectif > 0 && (() => {
+                    const pct = Math.min(100, Math.round((v.realiseMois / v.objectif) * 100));
+                    const atteint = v.realiseMois >= v.objectif;
+                    return (
+                      <div style={{ marginTop: '5px', maxWidth: '180px' }}>
+                        <div style={{ height: '5px', borderRadius: '20px', background: 'var(--surface-inset)', overflow: 'hidden' }}>
+                          <div style={{ width: `${pct}%`, height: '100%', borderRadius: '20px', background: atteint ? 'var(--success)' : 'var(--accent)' }} />
+                        </div>
+                        <div style={{ fontSize: '10.5px', color: atteint ? 'var(--success)' : 'var(--ink-45)', fontWeight: 600, marginTop: '3px' }}>{atteint ? '🎯 Objectif atteint' : `${pct}% de l'objectif`}</div>
+                      </div>
+                    );
+                  })()}
+                </div>
                 <div style={{ fontSize: '14.5px', fontWeight: 700, color: 'var(--accent)' }}>{v.totalVentes.toLocaleString()}</div>
                 <div style={{ fontSize: '14px', color: 'var(--ink-70)' }}>{v.nbVentes}</div>
                 <div style={{ fontSize: '14px', color: 'var(--ink-70)' }}>{v.nbProduits}</div>
@@ -104,6 +139,44 @@ export default function AdminVendeuses() {
               </div>
               {detailOuvert === v.id && (
                 <div style={{ padding: '16px 24px 20px', background: 'var(--surface-inset)', borderBottom: '1px solid var(--line-soft)' }}>
+                  {/* Objectif du mois */}
+                  <div style={{ padding: '16px 18px', borderRadius: '14px', background: 'var(--surface)', border: '1px solid var(--line)', marginBottom: '16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13.5px', fontWeight: 700, color: 'var(--ink)' }}>
+                        <span className="ms" style={{ fontSize: '18px', color: 'var(--accent)' }}>flag</span>Objectif de {nomDuMois()}
+                      </div>
+                      {objectifEdite !== v.id && (
+                        <button onClick={() => { setObjectifEdite(v.id); setValeurObjectif(v.objectif ? String(v.objectif) : ''); }} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12.5px', fontWeight: 600, color: 'var(--accent)', background: 'var(--accent-08)', border: '1px solid var(--accent-20)', borderRadius: '9px', padding: '6px 12px', cursor: 'pointer' }}>
+                          <span className="ms" style={{ fontSize: '15px' }}>edit</span>{v.objectif > 0 ? 'Modifier' : 'Définir'}
+                        </button>
+                      )}
+                    </div>
+                    {objectifEdite === v.id ? (
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        <input type="number" inputMode="numeric" value={valeurObjectif} onChange={e => setValeurObjectif(e.target.value)} placeholder="Objectif en FCFA" aria-label="Objectif en FCFA" style={{ flex: 1, minWidth: '140px', height: '40px', padding: '0 14px', borderRadius: '10px', background: 'var(--surface-inset)', border: '1px solid var(--line)', outline: 'none', color: 'var(--ink)', fontSize: '14px' }} />
+                        <button onClick={() => enregistrerObjectif(v.id)} disabled={sauvegardeObj} style={{ height: '40px', padding: '0 18px', borderRadius: '10px', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 700, background: 'var(--accent)', color: 'var(--on-accent)', opacity: sauvegardeObj ? 0.6 : 1 }}>{sauvegardeObj ? '...' : 'Enregistrer'}</button>
+                        <button onClick={() => setObjectifEdite(null)} disabled={sauvegardeObj} style={{ height: '40px', padding: '0 14px', borderRadius: '10px', cursor: 'pointer', fontSize: '13px', fontWeight: 600, background: 'var(--surface-inset)', color: 'var(--ink-55)', border: '1px solid var(--line)' }}>Annuler</button>
+                      </div>
+                    ) : v.objectif > 0 ? (() => {
+                      const pct = Math.min(100, Math.round((v.realiseMois / v.objectif) * 100));
+                      const atteint = v.realiseMois >= v.objectif;
+                      const reste = Math.max(0, v.objectif - v.realiseMois);
+                      return (
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '6px', fontSize: '13px' }}>
+                            <span style={{ color: 'var(--ink-70)' }}>Réalisé : <b style={{ color: 'var(--ink)' }}>{v.realiseMois.toLocaleString()}</b> / {v.objectif.toLocaleString()} FCFA</span>
+                            <span style={{ fontWeight: 700, color: atteint ? 'var(--success)' : 'var(--accent)' }}>{pct}%</span>
+                          </div>
+                          <div style={{ height: '9px', borderRadius: '20px', background: 'var(--surface-inset)', overflow: 'hidden' }}>
+                            <div style={{ width: `${pct}%`, height: '100%', borderRadius: '20px', background: atteint ? 'var(--success)' : 'var(--accent-grad)' }} />
+                          </div>
+                          <div style={{ fontSize: '12px', color: atteint ? 'var(--success)' : 'var(--ink-45)', fontWeight: 600, marginTop: '6px' }}>{atteint ? '🎯 Objectif atteint, bravo !' : `Il reste ${reste.toLocaleString()} FCFA à réaliser`}</div>
+                        </div>
+                      );
+                    })() : (
+                      <div style={{ fontSize: '13px', color: 'var(--ink-45)' }}>Aucun objectif fixé pour ce mois.</div>
+                    )}
+                  </div>
                   {chargementDetail ? (
                     <p style={{ color: 'var(--ink-45)', fontSize: '13px', textAlign: 'center' }}>Chargement...</p>
                   ) : ventesDetail.length === 0 ? (

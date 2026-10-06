@@ -27,11 +27,9 @@ function clientAdmin() {
   );
 }
 
-type InfosVente = { vendeuse: string; cliente: string; total: number; statut: string };
-
-/** Notifie tous les appareils admin abonnes. Best-effort : n'echoue jamais bruyamment. */
-export async function notifierVente(v: InfosVente) {
-  if (!process.env.VAPID_PRIVATE_KEY) return; // pas de cle privee -> notifications desactivees
+// Envoi d'un meme payload a tous les appareils admin abonnes. Best-effort :
+// n'echoue jamais bruyamment. Purge les abonnements expires (404/410).
+async function envoyerATousLesAdmins(payload: string) {
   configurer();
 
   const admin = clientAdmin();
@@ -40,14 +38,6 @@ export async function notifierVente(v: InfosVente) {
     .select('id, endpoint, p256dh, auth');
 
   if (!abos || abos.length === 0) return;
-
-  const statutTxt = v.statut === 'paye' ? 'payé' : 'partiel';
-  const payload = JSON.stringify({
-    title: '🛍️ Nouvelle vente',
-    body: `${v.vendeuse} : ${v.total.toLocaleString('fr-FR')} FCFA — ${v.cliente} (${statutTxt})`,
-    tag: 'vente',
-    url: '/admin',
-  });
 
   const morts: number[] = [];
   await Promise.all(
@@ -65,4 +55,37 @@ export async function notifierVente(v: InfosVente) {
   );
 
   if (morts.length) await admin.from('push_subscriptions').delete().in('id', morts);
+}
+
+type InfosVente = { vendeuse: string; cliente: string; total: number; statut: string };
+
+/** Notifie tous les appareils admin abonnes d'une nouvelle vente. */
+export async function notifierVente(v: InfosVente) {
+  if (!process.env.VAPID_PRIVATE_KEY) return; // pas de cle privee -> notifications desactivees
+
+  const statutTxt = v.statut === 'paye' ? 'payé' : 'partiel';
+  await envoyerATousLesAdmins(JSON.stringify({
+    title: '🛍️ Nouvelle vente',
+    body: `${v.vendeuse} : ${v.total.toLocaleString('fr-FR')} FCFA — ${v.cliente} (${statutTxt})`,
+    tag: 'vente',
+    url: '/admin',
+  }));
+}
+
+type ProduitBas = { nom: string; stock: number };
+
+/** Alerte l'admin quand un ou plusieurs produits viennent de passer sous le seuil. */
+export async function notifierStockBas(produits: ProduitBas[]) {
+  if (!process.env.VAPID_PRIVATE_KEY) return;
+  if (produits.length === 0) return;
+
+  const corps = produits
+    .map(p => (p.stock <= 0 ? `${p.nom} (épuisé)` : `${p.nom} (${p.stock} restant)`))
+    .join(', ');
+  await envoyerATousLesAdmins(JSON.stringify({
+    title: '⚠️ Stock bas',
+    body: `À réapprovisionner : ${corps}`,
+    tag: 'stock',
+    url: '/admin/produits',
+  }));
 }
