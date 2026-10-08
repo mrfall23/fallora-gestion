@@ -25,6 +25,8 @@ export default function AdminDashboard() {
   const [comparatif, setComparatif] = useState({ caMois: 0, nbMois: 0, caMoisPrec: 0, nbMoisPrec: 0 });
   const [caParMode, setCaParMode] = useState<{ mode: string; total: number }[]>([]);
   const [produitsCa, setProduitsCa] = useState<{ nom: string; quantite: number; ca: number }[]>([]);
+  const [marge, setMarge] = useState({ beneficeMois: 0, caCouvertMois: 0, beneficeMoisPrec: 0 });
+  const [produitsMarge, setProduitsMarge] = useState<{ nom: string; quantite: number; ca: number; benefice: number }[]>([]);
   const [periode, setPeriode] = useState<{ id: number | null; nom: string; debut: string | null }>({ id: null, nom: 'Période en cours', debut: null });
   const [clotureOuverte, setClotureOuverte] = useState(false);
   const [nomPeriode, setNomPeriode] = useState('');
@@ -74,6 +76,9 @@ export default function AdminDashboard() {
     });
     setCaParMode((d.ca_par_mode || []).map((m: any) => ({ mode: m.mode, total: Number(m.total) || 0 })));
     setProduitsCa((d.produits_ca || []).map((p: any) => ({ nom: p.nom, quantite: Number(p.quantite) || 0, ca: Number(p.ca) || 0 })));
+    const m = d.marge || {};
+    setMarge({ beneficeMois: Number(m.benefice_mois) || 0, caCouvertMois: Number(m.ca_couvert_mois) || 0, beneficeMoisPrec: Number(m.benefice_mois_prec) || 0 });
+    setProduitsMarge((d.produits_marge || []).map((p: any) => ({ nom: p.nom, quantite: Number(p.quantite) || 0, ca: Number(p.ca) || 0, benefice: Number(p.benefice) || 0 })));
     const pr = d.periode || {};
     setPeriode({ id: pr.id ?? null, nom: pr.nom || 'Période en cours', debut: pr.debut || null });
   };
@@ -144,7 +149,12 @@ export default function AdminDashboard() {
         {[
           { label: `Chiffre d'affaires — ${moisLabel()}`, unit: 'FCFA', courant: comparatif.caMois, precedent: comparatif.caMoisPrec },
           { label: `Ventes — ${moisLabel()}`, unit: 'ventes', courant: comparatif.nbMois, precedent: comparatif.nbMoisPrec },
-        ].map(s => {
+          { label: `Bénéfice — ${moisLabel()}`, unit: 'FCFA', courant: marge.beneficeMois, precedent: marge.beneficeMoisPrec,
+            // Le benefice ne compte que les produits dont le prix d'achat est renseigne.
+            note: comparatif.caMois > 0 && marge.caCouvertMois < comparatif.caMois
+              ? `Calculé sur ${Math.round((marge.caCouvertMois / comparatif.caMois) * 100)} % du CA — renseignez les prix d'achat dans Produits`
+              : comparatif.caMois > 0 ? `Marge : ${Math.round((marge.beneficeMois / comparatif.caMois) * 100)} % du CA` : undefined },
+        ].map((s: { label: string; unit: string; courant: number; precedent: number; note?: string }) => {
           const delta = calculerDelta(s.courant, s.precedent);
           const positif = delta !== null && delta >= 0;
           return (
@@ -162,6 +172,7 @@ export default function AdminDashboard() {
                 <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--accent)' }}>{s.unit}</span>
               </div>
               <div style={{ marginTop: '4px', fontSize: '12px', color: 'var(--ink-45)' }}>Mois précédent : {s.precedent.toLocaleString()} {s.unit}</div>
+              {s.note && <div style={{ marginTop: '4px', fontSize: '11.5px', color: s.note.startsWith('Calculé') ? 'var(--warn)' : 'var(--success)' }}>{s.note}</div>}
             </div>
           );
         })}
@@ -283,10 +294,28 @@ export default function AdminDashboard() {
         {/* Top produits par chiffre d'affaires */}
         <div style={{ padding: '24px', borderRadius: '20px', background: 'var(--surface)', border: '1px solid var(--line)', backdropFilter: 'blur(20px)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px' }}>
-            <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--ink)' }}>Produits les plus rentables</div>
+            <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--ink)' }}>{produitsMarge.length > 0 ? 'Produits les plus rentables' : "Meilleurs produits (chiffre d'affaires)"}</div>
             <a href="/admin/rapports" style={{ fontSize: '13px', color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}>Rapports</a>
           </div>
-          {produitsCa.length === 0 ? (
+          {produitsMarge.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {produitsMarge.map((p, i) => (
+                <div key={p.nom} style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '11px 8px', borderRadius: '12px' }}>
+                  <div style={{ width: '28px', height: '28px', borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--accent-12)', border: '1px solid var(--accent-20)', flexShrink: 0 }}>
+                    <span style={{ fontSize: '13px', fontWeight: 800, color: 'var(--accent)' }}>{i + 1}</span>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nom}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--ink-45)' }}>{p.quantite} vendu{p.quantite > 1 ? 's' : ''} · CA {p.ca.toLocaleString()}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '14px', fontWeight: 700, color: p.benefice >= 0 ? 'var(--success)' : 'var(--danger)' }}>{p.benefice >= 0 ? '+' : ''}{p.benefice.toLocaleString()}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--ink-45)' }}>FCFA de bénéfice</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : produitsCa.length === 0 ? (
             <p style={{ color: 'var(--ink-45)', fontSize: '13px', textAlign: 'center', padding: '20px 0' }}>Aucune donnée.</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>

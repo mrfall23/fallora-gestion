@@ -80,7 +80,7 @@ export default function VendeusePage() {
   };
 
   const chargerProduits = async () => {
-    const { data } = await supabase.from('produits').select('*').order('nom');
+    const { data } = await supabase.from('produits').select('*').eq('actif', true).order('nom');
     setProduits(data || []);
     setChargement(false);
   };
