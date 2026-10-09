@@ -8,6 +8,7 @@ import { FalloraLogo } from '../components/Logo';
 import { useIsMobile } from '../components/useMediaQuery';
 import { type RecuData } from '../components/Recu';
 import RecuModal from '../components/RecuModal';
+import MesVentes from './MesVentes';
 import { lireFile, ecrireFile, ajouterAFile, nouvelId, type PayloadVente } from '@/lib/fileHorsLigne';
 
 const inputStyle: React.CSSProperties = { height: '44px', padding: '0 14px', borderRadius: '12px', background: 'var(--surface-inset)', border: '1px solid var(--line)', outline: 'none', color: 'var(--ink)', fontSize: '14px', width: '100%' };
@@ -31,6 +32,8 @@ export default function VendeusePage() {
   const [enLigne, setEnLigne] = useState(true);
   const [nbEnAttente, setNbEnAttente] = useState(0);
   const [synchro, setSynchro] = useState(false);
+  const [onglet, setOnglet] = useState<'vendre' | 'historique'>('vendre');
+  const [versionHisto, setVersionHisto] = useState(0); // force le rechargement de « Mes ventes »
   const syncRef = useRef(false); // garde anti double-synchronisation (concurrence)
   const router = useRouter();
 
@@ -72,7 +75,7 @@ export default function VendeusePage() {
       setNbEnAttente(restants.length);
       if (refuses.length > 0) setErreur(`${refuses.length} vente(s) hors ligne non enregistrée(s) — ${refuses.join(' ; ')}`);
       await chargerProduits();
-      chargerObjectif();
+      chargerObjectif(); setVersionHisto(x => x + 1);
     } finally {
       syncRef.current = false; setSynchro(false);
     }
@@ -182,7 +185,7 @@ export default function VendeusePage() {
       setSucces('Vente enregistrée avec succès !');
       setPanier([]); setCliente({ nom: '', telephone: '' }); setMontantPaye(''); setStatutPaiement('paye'); setModePaiement('cash');
       await chargerProduits();
-      chargerObjectif();
+      chargerObjectif(); setVersionHisto(x => x + 1);
       setTimeout(() => setSucces(''), 4000);
     } catch {
       // Echec RESEAU (fetch a jete) : on bascule en file d'attente plutot que
@@ -269,7 +272,20 @@ export default function VendeusePage() {
         );
       })()}
 
-      {chargement ? (
+      {/* Onglets */}
+      <div style={{ maxWidth: '1400px', margin: '0 auto', padding: isMobile ? '14px 16px 0' : '20px 32px 0' }}>
+        <div role="tablist" style={{ display: 'flex', gap: '4px', padding: '4px', borderRadius: '14px', background: 'var(--surface-inset)', border: '1px solid var(--line)', maxWidth: '420px' }}>
+          {([['vendre', 'point_of_sale', 'Vendre'], ['historique', 'receipt_long', 'Mes ventes']] as const).map(([val, icone, label]) => (
+            <button key={val} role="tab" aria-selected={onglet === val} onClick={() => setOnglet(val)} style={{ flex: 1, height: '40px', borderRadius: '10px', cursor: 'pointer', border: 'none', fontSize: '14px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '7px', background: onglet === val ? 'var(--surface)' : 'transparent', color: onglet === val ? 'var(--accent-deep)' : 'var(--ink-55)', boxShadow: onglet === val ? 'var(--shadow-md)' : 'none' }}>
+              <span className="ms" style={{ fontSize: '19px' }}>{icone}</span>{label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {onglet === 'historique' ? (
+        <MesVentes isMobile={isMobile} vendeuseNom={user?.nom || ''} enAttente={nbEnAttente > 0 ? lireFile() : []} rafraichir={versionHisto} onRecu={setRecu} />
+      ) : chargement ? (
         <div style={{ textAlign: 'center', padding: '80px', color: 'var(--ink-45)' }}>Chargement des produits...</div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 380px', gap: isMobile ? '18px' : '24px', padding: isMobile ? '18px 16px' : '28px 32px', maxWidth: '1400px', margin: '0 auto' }}>
