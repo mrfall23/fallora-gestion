@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { SEUIL_STOCK_BAS } from '@/lib/constantes';
+import PanneauStock from './PanneauStock';
 
 type Produit = { id: number; nom: string; prix: number; description: string; stock_restant: number; stock_initial: number; image: string | null; actif: boolean };
 type FormProduit = { nom: string; prix: number; description: string; stock_restant: number; image: string | null; prix_achat: string };
@@ -19,6 +20,7 @@ export default function AdminProduits() {
   const [erreur, setErreur] = useState('');
   // Prix d'achat par produit (table produits_couts, lisible par l'admin seulement).
   const [couts, setCouts] = useState<Record<number, number>>({});
+  const [stockOuvert, setStockOuvert] = useState<number | null>(null);
 
   useEffect(() => { chargerProduits(); }, []);
 
@@ -42,14 +44,15 @@ export default function AdminProduits() {
     const prixAchat = form.prix_achat.trim() === '' ? null : Number(form.prix_achat);
     if (prixAchat !== null && (isNaN(prixAchat) || prixAchat < 0)) { setErreur("Prix d'achat invalide."); return; }
     setSauvegarde(true); setErreur('');
-    const champs = { nom: form.nom.trim(), prix: form.prix, description: form.description, stock_restant: form.stock_restant, image: form.image };
+    const champs = { nom: form.nom.trim(), prix: form.prix, description: form.description, image: form.image };
     let produitId = produitEdite?.id;
     if (produitEdite) {
-      const diff = form.stock_restant - produitEdite.stock_restant;
-      const { error } = await supabase.from('produits').update({ ...champs, stock_initial: produitEdite.stock_initial + diff }).eq('id', produitEdite.id);
+      // Le stock d'un produit existant ne se modifie PLUS ici : uniquement via
+      // Reapprovisionner / Inventaire (panneau Stock), pour tracer chaque mouvement.
+      const { error } = await supabase.from('produits').update(champs).eq('id', produitEdite.id);
       if (error) { setSauvegarde(false); setErreur(`Enregistrement impossible : ${error.message}`); return; }
     } else {
-      const { data, error } = await supabase.from('produits').insert({ ...champs, stock_initial: form.stock_restant }).select('id').single();
+      const { data, error } = await supabase.from('produits').insert({ ...champs, stock_restant: form.stock_restant, stock_initial: form.stock_restant }).select('id').single();
       if (error) { setSauvegarde(false); setErreur(`Enregistrement impossible : ${error.message}`); return; }
       produitId = data.id;
     }
@@ -129,8 +132,15 @@ export default function AdminProduits() {
               )}
             </div>
             <div>
-              <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--ink-45)', letterSpacing: '.5px', marginBottom: '6px' }}>STOCK *</div>
-              <input style={inputStyle} type="number" value={form.stock_restant || ''} onChange={e => setForm({ ...form, stock_restant: Number(e.target.value) })} placeholder="0" />
+              <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--ink-45)', letterSpacing: '.5px', marginBottom: '6px' }}>{produitEdite ? 'STOCK' : 'STOCK INITIAL *'}</div>
+              {produitEdite ? (
+                <>
+                  <input style={{ ...inputStyle, color: 'var(--ink-55)' }} value={produitEdite.stock_restant} readOnly aria-readonly />
+                  <div style={{ fontSize: '11.5px', marginTop: '5px', color: 'var(--ink-45)' }}>Modifiable via le bouton « Stock » (réappro / inventaire).</div>
+                </>
+              ) : (
+                <input style={inputStyle} type="number" min={0} value={form.stock_restant || ''} onChange={e => setForm({ ...form, stock_restant: Number(e.target.value) })} placeholder="0" />
+              )}
             </div>
             <div>
               <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--ink-45)', letterSpacing: '.5px', marginBottom: '6px' }}>URL IMAGE (optionnel)</div>
@@ -193,6 +203,9 @@ export default function AdminProduits() {
                 <button onClick={() => ouvrirEdit(p)} style={{ display: 'flex', alignItems: 'center', gap: '7px', height: '40px', padding: '0 16px', borderRadius: '12px', cursor: 'pointer', background: 'var(--accent-12)', border: '1px solid var(--accent-25)', color: 'var(--accent-deep)', fontSize: '13.5px', fontWeight: 600 }}>
                   <span className="ms" style={{ fontSize: '18px' }}>edit</span>Modifier
                 </button>
+                <button onClick={() => setStockOuvert(stockOuvert === p.id ? null : p.id)} aria-expanded={stockOuvert === p.id} title="Réapprovisionner, faire l'inventaire, voir l'historique" style={{ display: 'flex', alignItems: 'center', gap: '7px', height: '40px', padding: '0 14px', borderRadius: '12px', cursor: 'pointer', background: stockOuvert === p.id ? 'var(--accent)' : 'var(--surface-inset)', border: '1px solid var(--line)', color: stockOuvert === p.id ? 'var(--on-accent)' : 'var(--ink-70)', fontSize: '13.5px', fontWeight: 600 }}>
+                  <span className="ms" style={{ fontSize: '18px' }}>inventory</span>Stock
+                </button>
                 <button onClick={() => basculerActif(p)} title={p.actif ? 'Masquer ce produit chez les vendeuses (historique conservé)' : 'Rendre ce produit de nouveau vendable'} style={{ display: 'flex', alignItems: 'center', gap: '7px', height: '40px', padding: '0 14px', borderRadius: '12px', cursor: 'pointer', background: 'var(--surface-inset)', border: '1px solid var(--line)', color: 'var(--ink-70)', fontSize: '13.5px', fontWeight: 600 }}>
                   <span className="ms" style={{ fontSize: '18px' }}>{p.actif ? 'visibility_off' : 'visibility'}</span>{p.actif ? 'Retirer de la vente' : 'Remettre en vente'}
                 </button>
@@ -200,6 +213,7 @@ export default function AdminProduits() {
                   <span className="ms" style={{ fontSize: '18px' }}>delete</span>
                 </button>
               </div>
+              {stockOuvert === p.id && <PanneauStock produit={p} onModifie={chargerProduits} />}
             </div>
           );
         })}
