@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { creerClientServeur } from '@/lib/supabase-server';
 import { notifierVente, notifierStockBas } from '@/lib/push';
+import { telegramConfigure, envoyerTelegram, texteVente, texteStockBas } from '@/lib/telegram';
 import { SEUIL_STOCK_BAS } from '@/lib/constantes';
 
 // Enregistrement d'une vente, cote serveur, pour pouvoir notifier l'admin.
@@ -44,26 +45,46 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: error.message || "Erreur lors de l'enregistrement." }, { status: 400 });
   }
 
-  // ── Notification admin (best-effort, jamais bloquante) ──
+  const siteUrl = new URL(request.url).origin;
+
+  // ── Notification admin : push + Telegram (best-effort, jamais bloquante) ──
   try {
     const admin = clientAdmin();
     const { data: v } = await admin
       .from('ventes')
-      .select('total, statut_paiement, cliente_id, vendeuse_id')
+      .select('total, montant_paye, reste_a_payer, statut_paiement, cliente_id, vendeuse_id')
       .eq('id', venteId)
       .single();
 
     if (v) {
-      const [{ data: cli }, { data: ven }] = await Promise.all([
-        v.cliente_id ? admin.from('clientes').select('nom').eq('id', v.cliente_id).single() : Promise.resolve({ data: null }),
+      const [{ data: cli }, { data: ven }, { data: lignes }] = await Promise.all([
+        v.cliente_id ? admin.from('clientes').select('nom, telephone').eq('id', v.cliente_id).single() : Promise.resolve({ data: null }),
         v.vendeuse_id ? admin.from('utilisateurs').select('nom').eq('id', v.vendeuse_id).single() : Promise.resolve({ data: null }),
+        admin.from('vente_produits').select('produit_id, quantite, prix_unitaire').eq('vente_id', venteId),
       ]);
-      await notifierVente({
-        vendeuse: (ven as any)?.nom || 'Une vendeuse',
-        cliente: (cli as any)?.nom || 'Cliente',
-        total: Number(v.total) || 0,
-        statut: v.statut_paiement,
-      });
+      const ids = (lignes || []).map((l: any) => l.produit_id);
+      const { data: noms } = ids.length ? await admin.from('produits').select('id, nom').in('id', ids) : { data: [] as any[] };
+      const vendeuse = (ven as any)?.nom || 'Une vendeuse';
+      const cliente = (cli as any)?.nom || 'Cliente';
+
+      await Promise.all([
+        notifierVente({ vendeuse, cliente, total: Number(v.total) || 0, statut: v.statut_paiement }),
+        telegramConfigure() ? envoyerTelegram(texteVente({
+          id: venteId as number,
+          vendeuse,
+          cliente,
+          telephone: (cli as any)?.telephone || null,
+          articles: (lignes || []).map((l: any) => ({
+            nom: (noms || []).find((p: any) => p.id === l.produit_id)?.nom || 'Produit',
+            quantite: Number(l.quantite) || 0,
+            prix: Number(l.prix_unitaire) || 0,
+          })),
+          total: Number(v.total) || 0,
+          paye: Number(v.montant_paye) || 0,
+          reste: Number(v.reste_a_payer) || 0,
+          mode: mode_paiement || 'cash',
+        }, siteUrl)) : Promise.resolve(),
+      ]);
     }
   } catch (e) {
     console.error('Notification de vente echouee (sans impact sur la vente) :', e);
@@ -93,7 +114,12 @@ export async function POST(request: Request) {
         .filter(p => p.franchi)
         .map(({ nom, stock }) => ({ nom, stock }));
 
-      if (franchis.length > 0) await notifierStockBas(franchis);
+      if (franchis.length > 0) {
+        await Promise.all([
+          notifierStockBas(franchis),
+          telegramConfigure() ? envoyerTelegram(texteStockBas(franchis, siteUrl)) : Promise.resolve(),
+        ]);
+      }
     }
   } catch (e) {
     console.error('Alerte stock bas echouee (sans impact sur la vente) :', e);
