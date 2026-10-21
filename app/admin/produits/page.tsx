@@ -1,8 +1,9 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { SEUIL_STOCK_BAS } from '@/lib/constantes';
 import PanneauStock from './PanneauStock';
+import { envoyerPhoto, supprimerPhoto } from '@/lib/photos';
 
 type Produit = { id: number; nom: string; prix: number; description: string; stock_restant: number; stock_initial: number; image: string | null; actif: boolean };
 type FormProduit = { nom: string; prix: number; description: string; stock_restant: number; image: string | null; prix_achat: string };
@@ -21,6 +22,11 @@ export default function AdminProduits() {
   // Prix d'achat par produit (table produits_couts, lisible par l'admin seulement).
   const [couts, setCouts] = useState<Record<number, number>>({});
   const [stockOuvert, setStockOuvert] = useState<number | null>(null);
+  const [envoiPhoto, setEnvoiPhoto] = useState(false);
+  const [lienManuel, setLienManuel] = useState(false);
+  // Photos envoyees pendant ce formulaire : celles qui ne sont finalement pas
+  // retenues (annulation, remplacement) sont supprimees du stockage.
+  const photosEnvoyees = useRef<string[]>([]);
 
   useEffect(() => { chargerProduits(); }, []);
 
@@ -36,7 +42,28 @@ export default function AdminProduits() {
 
   const ouvrirAjout = () => { setForm(FORM_VIDE); setProduitEdite(null); setErreur(''); setFormOuvert(true); };
   const ouvrirEdit = (p: Produit) => { setForm({ nom: p.nom, prix: p.prix, description: p.description || '', stock_restant: p.stock_restant, image: p.image, prix_achat: couts[p.id] !== undefined ? String(couts[p.id]) : '' }); setProduitEdite(p); setErreur(''); setFormOuvert(true); };
-  const fermerForm = () => { setFormOuvert(false); setProduitEdite(null); };
+  const fermerForm = () => { setFormOuvert(false); setProduitEdite(null); setLienManuel(false); photosEnvoyees.current = []; };
+
+  const annulerForm = () => {
+    photosEnvoyees.current.forEach(url => supprimerPhoto(url));
+    fermerForm();
+  };
+
+  const choisirPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fichier = e.target.files?.[0];
+    e.target.value = ''; // permet de re-choisir la meme photo
+    if (!fichier) return;
+    setEnvoiPhoto(true); setErreur('');
+    try {
+      const url = await envoyerPhoto(fichier);
+      photosEnvoyees.current.push(url);
+      setForm(f => ({ ...f, image: url }));
+    } catch (err) {
+      setErreur(err instanceof Error ? err.message : "Envoi de la photo impossible.");
+    } finally {
+      setEnvoiPhoto(false);
+    }
+  };
 
   const sauvegarder = async () => {
     if (!form.nom.trim()) { setErreur('Le nom du produit est obligatoire.'); return; }
@@ -64,6 +91,9 @@ export default function AdminProduits() {
       if (error) { setSauvegarde(false); await chargerProduits(); setErreur(`Produit enregistré, mais pas le prix d'achat : ${error.message}`); return; }
     }
     setSauvegarde(false);
+    // Menage : photos envoyees mais non retenues, et ancienne photo remplacee.
+    photosEnvoyees.current.filter(url => url !== form.image).forEach(url => supprimerPhoto(url));
+    if (produitEdite?.image && produitEdite.image !== form.image) supprimerPhoto(produitEdite.image);
     await chargerProduits();
     fermerForm();
   };
@@ -81,6 +111,7 @@ export default function AdminProduits() {
     setErreur('');
     const { error } = await supabase.from('produits').delete().eq('id', p.id);
     // 23503 = cle etrangere : le produit figure dans des ventes (historique a conserver).
+    if (!error) supprimerPhoto(p.image);
     if (error) { setErreur(error.code === '23503' ? `« ${p.nom} » a déjà été vendu : il ne peut pas être supprimé sans effacer l'historique des ventes. Utilisez plutôt « Retirer de la vente ».` : `Suppression impossible : ${error.message}`); return; }
     await chargerProduits();
   };
@@ -142,9 +173,34 @@ export default function AdminProduits() {
                 <input style={inputStyle} type="number" min={0} value={form.stock_restant || ''} onChange={e => setForm({ ...form, stock_restant: Number(e.target.value) })} placeholder="0" />
               )}
             </div>
-            <div>
-              <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--ink-45)', letterSpacing: '.5px', marginBottom: '6px' }}>URL IMAGE (optionnel)</div>
-              <input style={inputStyle} value={form.image || ''} onChange={e => setForm({ ...form, image: e.target.value || null })} placeholder="https://..." />
+          </div>
+          <div style={{ marginBottom: '12px' }}>
+            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--ink-45)', letterSpacing: '.5px', marginBottom: '6px' }}>PHOTO (optionnel)</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+              {form.image ? (
+                <img src={form.image} alt="Aperçu" style={{ width: '88px', height: '88px', objectFit: 'cover', borderRadius: '14px', border: '1px solid var(--line)', flexShrink: 0 }} />
+              ) : (
+                <div style={{ width: '88px', height: '88px', borderRadius: '14px', background: 'var(--img-empty)', border: '1px dashed var(--accent-25)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <span className="ms" style={{ fontSize: '30px', color: 'var(--accent-30)' }}>{envoiPhoto ? 'hourglass_top' : 'image'}</span>
+                </div>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minWidth: 0 }}>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', height: '40px', padding: '0 16px', borderRadius: '11px', cursor: envoiPhoto ? 'default' : 'pointer', background: 'var(--accent-12)', border: '1px solid var(--accent-25)', color: 'var(--accent-deep)', fontSize: '13.5px', fontWeight: 700, opacity: envoiPhoto ? 0.6 : 1 }}>
+                    <span className="ms" style={{ fontSize: '19px' }}>photo_camera</span>
+                    {envoiPhoto ? 'Envoi…' : form.image ? 'Changer la photo' : 'Prendre / choisir une photo'}
+                    <input type="file" accept="image/*" onChange={choisirPhoto} disabled={envoiPhoto} style={{ display: 'none' }} />
+                  </label>
+                  {form.image && !envoiPhoto && (
+                    <button onClick={() => setForm({ ...form, image: null })} style={{ height: '40px', padding: '0 14px', borderRadius: '11px', cursor: 'pointer', background: 'transparent', border: '1px solid var(--line)', color: 'var(--ink-55)', fontSize: '13px', fontWeight: 600 }}>Retirer</button>
+                  )}
+                </div>
+                {lienManuel ? (
+                  <input style={{ ...inputStyle, height: '38px', fontSize: '13px' }} value={form.image || ''} onChange={e => setForm({ ...form, image: e.target.value || null })} placeholder="https://..." aria-label="Lien de l'image" />
+                ) : (
+                  <button onClick={() => setLienManuel(true)} style={{ alignSelf: 'flex-start', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--ink-45)', fontSize: '12px', textDecoration: 'underline' }}>ou coller un lien d&apos;image</button>
+                )}
+              </div>
             </div>
           </div>
           <div style={{ marginBottom: '18px' }}>
@@ -152,10 +208,10 @@ export default function AdminProduits() {
             <textarea style={{ ...inputStyle, height: '72px', resize: 'vertical', paddingTop: '12px' } as any} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Description optionnelle..." />
           </div>
           <div style={{ display: 'flex', gap: '10px' }}>
-            <button onClick={sauvegarder} disabled={sauvegarde} style={{ flex: 1, height: '46px', border: 'none', borderRadius: '13px', cursor: 'pointer', background: 'var(--accent-grad)', color: 'var(--on-accent)', fontWeight: 700, fontSize: '14px' }}>
+            <button onClick={sauvegarder} disabled={sauvegarde || envoiPhoto} style={{ flex: 1, height: '46px', border: 'none', borderRadius: '13px', cursor: 'pointer', background: 'var(--accent-grad)', color: 'var(--on-accent)', fontWeight: 700, fontSize: '14px' }}>
               {sauvegarde ? 'Sauvegarde...' : produitEdite ? 'Enregistrer les modifications' : 'Créer le produit'}
             </button>
-            <button onClick={fermerForm} style={{ height: '46px', padding: '0 20px', border: '1px solid var(--line)', borderRadius: '13px', cursor: 'pointer', background: 'transparent', color: 'var(--ink-55)', fontSize: '14px' }}>Annuler</button>
+            <button onClick={annulerForm} style={{ height: '46px', padding: '0 20px', border: '1px solid var(--line)', borderRadius: '13px', cursor: 'pointer', background: 'transparent', color: 'var(--ink-55)', fontSize: '14px' }}>Annuler</button>
           </div>
         </div>
       )}
