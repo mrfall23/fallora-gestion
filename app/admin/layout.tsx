@@ -5,6 +5,7 @@ import { useUtilisateur, seDeconnecter } from '@/lib/utilisateur';
 import { FalloraLogo } from '../components/Logo';
 import { useIsMobile } from '../components/useMediaQuery';
 import PushToggle from '../components/PushToggle';
+import ChangerMotDePasse from '../components/ChangerMotDePasse';
 
 const NAV = [
   { href: '/admin', icon: 'dashboard', label: 'Tableau de bord' },
@@ -96,6 +97,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <div style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.nom}</div>
             <div style={{ fontSize: '11.5px', color: 'var(--ink-45)' }}>Administratrice</div>
           </div>
+          <ChangerMotDePasse bouton={ouvrir => (
+            <button onClick={ouvrir} title="Changer mon mot de passe" aria-label="Changer mon mot de passe" style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px', display: 'flex' }}>
+              <span className="ms" style={{ fontSize: '20px', color: 'var(--ink-45)' }}>key</span>
+            </button>
+          )} />
           <button onClick={deconnecter} title="Déconnexion" aria-label="Se déconnecter" style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '6px', display: 'flex' }}>
             <span className="ms" style={{ fontSize: '20px', color: 'var(--ink-45)' }}>logout</span>
           </button>

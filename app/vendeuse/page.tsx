@@ -9,6 +9,7 @@ import { useIsMobile } from '../components/useMediaQuery';
 import { type RecuData } from '../components/Recu';
 import RecuModal from '../components/RecuModal';
 import MesVentes from './MesVentes';
+import ChangerMotDePasse from '../components/ChangerMotDePasse';
 import { lireFile, ecrireFile, ajouterAFile, nouvelId, type PayloadVente } from '@/lib/fileHorsLigne';
 import { normaliserTel, sansAccents } from '@/lib/recherche';
 
@@ -256,6 +257,11 @@ export default function VendeusePage() {
               <span style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--ink)' }}>{user.nom}</span>
             </div>
           )}
+          <ChangerMotDePasse bouton={ouvrir => (
+            <button onClick={ouvrir} aria-label="Changer mon mot de passe" title="Changer mon mot de passe" style={{ background: 'transparent', border: '1px solid var(--line)', borderRadius: '10px', padding: '8px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', color: 'var(--ink-55)' }}>
+              <span className="ms" style={{ fontSize: '18px' }}>key</span>
+            </button>
+          )} />
           <button onClick={seDeconnecter} aria-label="Se déconnecter" style={{ background: 'transparent', border: '1px solid var(--line)', borderRadius: '10px', padding: '8px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--ink-55)', fontSize: '13px' }}>
             <span className="ms" style={{ fontSize: '18px' }}>logout</span>
           </button>
