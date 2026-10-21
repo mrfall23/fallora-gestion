@@ -10,6 +10,7 @@ import { type RecuData } from '../components/Recu';
 // ventes (et leurs articles / paiements) : aucun filtre vendeuse a poser ici.
 
 const MODE_LABELS: Record<string, string> = { cash: 'Espèces', mobile_money: 'Mobile Money', orange_money: 'Orange Money' };
+const MODES = Object.entries(MODE_LABELS);
 const PAR_PAGE = 30;
 
 type Ligne = { nom: string; quantite: number; prix: number };
@@ -40,6 +41,36 @@ export default function MesVentes({ isMobile, vendeuseNom, enAttente, rafraichir
   const [erreur, setErreur] = useState('');
   const [ouverte, setOuverte] = useState<number | null>(null);
   const [limite, setLimite] = useState(PAR_PAGE);
+  const [version, setVersion] = useState(0); // recharge apres un encaissement
+  const [montantVersement, setMontantVersement] = useState<number | ''>('');
+  const [modeVersement, setModeVersement] = useState('cash');
+  const [encaissement, setEncaissement] = useState(false);
+  const [erreurVersement, setErreurVersement] = useState('');
+  const [succes, setSucces] = useState('');
+
+  const ouvrir = (v: Vente | null) => {
+    setOuverte(v?.id ?? null);
+    setMontantVersement(v && Number(v.reste_a_payer) > 0 ? Number(v.reste_a_payer) : '');
+    setModeVersement('cash'); setErreurVersement('');
+  };
+
+  // Versement sur une vente a credit. La base verifie que la vente est bien a
+  // cette vendeuse, non annulee, et que le montant ne depasse pas le reste du.
+  const encaisser = async (v: Vente) => {
+    const montant = Number(montantVersement) || 0;
+    if (montant <= 0) { setErreurVersement('Entrez le montant reçu.'); return; }
+    if (montant > Number(v.reste_a_payer)) { setErreurVersement(`Le reste dû est de ${Number(v.reste_a_payer).toLocaleString()} FCFA.`); return; }
+    if (!navigator.onLine) { setErreurVersement('Connexion requise pour encaisser un versement.'); return; }
+    setEncaissement(true); setErreurVersement('');
+    const { data, error } = await supabase.rpc('enregistrer_paiement', { p_vente_id: v.id, p_montant: montant, p_mode: modeVersement });
+    setEncaissement(false);
+    if (error) { setErreurVersement(error.message || "Échec de l'encaissement."); return; }
+    const reste = Number((data as { reste_a_payer?: number } | null)?.reste_a_payer) || 0;
+    setSucces(`${montant.toLocaleString()} FCFA encaissés pour ${v.clienteNom || 'la cliente'}${reste > 0 ? ` — reste ${reste.toLocaleString()} FCFA` : ' — vente soldée'}.`);
+    setTimeout(() => setSucces(''), 5000);
+    setMontantVersement('');
+    setVersion(x => x + 1);
+  };
 
   useEffect(() => {
     let annule = false;
@@ -49,7 +80,9 @@ export default function MesVentes({ isMobile, vendeuseNom, enAttente, rafraichir
         const debut = debutPeriode(periode);
         const ventesData = await toutLire(() => {
           let q = supabase.from('ventes').select('id, date_vente, total, montant_paye, reste_a_payer, statut_paiement, annulee, cliente_id');
-          if (debut) q = q.gte('date_vente', debut.toISOString());
+          // « À encaisser » : toutes les ventes avec un reste du, quelle que soit la date.
+          if (periode === 'credit') q = q.eq('annulee', false).gt('reste_a_payer', 0);
+          else if (debut) q = q.gte('date_vente', debut.toISOString());
           return q.order('date_vente', { ascending: false }).order('id', { ascending: false });
         });
         const ids = ventesData.map((v: any) => v.id);
@@ -77,7 +110,7 @@ export default function MesVentes({ isMobile, vendeuseNom, enAttente, rafraichir
       if (!annule) setChargement(false);
     })();
     return () => { annule = true; };
-  }, [periode, rafraichir]);
+  }, [periode, rafraichir, version]);
 
   const actives = ventes.filter(v => !v.annulee);
   const ca = actives.reduce((s, v) => s + (Number(v.total) || 0), 0);
@@ -89,8 +122,8 @@ export default function MesVentes({ isMobile, vendeuseNom, enAttente, rafraichir
     <div style={{ padding: isMobile ? '18px 16px' : '28px 32px', maxWidth: '900px', margin: '0 auto' }}>
       {/* Periode */}
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
-        {[['jour', "Aujourd'hui"], ['7j', '7 jours'], ['mois', 'Ce mois'], ['tout', 'Tout']].map(([val, label]) => (
-          <button key={val} onClick={() => { setPeriode(val); setLimite(PAR_PAGE); setOuverte(null); }} style={{ height: '38px', padding: '0 16px', borderRadius: '20px', cursor: 'pointer', fontSize: '13.5px', fontWeight: 600, border: periode === val ? 'none' : '1px solid var(--line)', background: periode === val ? 'var(--accent)' : 'var(--surface)', color: periode === val ? 'var(--on-accent)' : 'var(--ink-70)' }}>{label}</button>
+        {[['jour', "Aujourd'hui"], ['7j', '7 jours'], ['mois', 'Ce mois'], ['tout', 'Tout'], ['credit', 'À encaisser']].map(([val, label]) => (
+          <button key={val} onClick={() => { setPeriode(val); setLimite(PAR_PAGE); ouvrir(null); }} style={{ height: '38px', padding: '0 16px', borderRadius: '20px', cursor: 'pointer', fontSize: '13.5px', fontWeight: 600, border: periode === val ? 'none' : '1px solid var(--line)', background: periode === val ? 'var(--accent)' : 'var(--surface)', color: periode === val ? 'var(--on-accent)' : 'var(--ink-70)' }}>{label}</button>
         ))}
       </div>
 
@@ -125,6 +158,8 @@ export default function MesVentes({ isMobile, vendeuseNom, enAttente, rafraichir
         </div>
       )}
 
+      {succes && <div role="status" style={{ marginBottom: '14px', padding: '12px 16px', borderRadius: '12px', background: 'var(--success-tint)', border: '1px solid var(--success-line)', color: 'var(--success)', fontSize: '13.5px', fontWeight: 600 }}>{succes}</div>}
+
       {erreur && <div role="alert" style={{ marginBottom: '14px', padding: '12px 16px', borderRadius: '12px', background: 'var(--danger-tint)', border: '1px solid var(--danger-line)', color: 'var(--danger)', fontSize: '13.5px' }}>{erreur}</div>}
 
       {chargement ? (
@@ -132,7 +167,7 @@ export default function MesVentes({ isMobile, vendeuseNom, enAttente, rafraichir
       ) : ventes.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '50px', color: 'var(--ink-45)' }}>
           <span className="ms" style={{ fontSize: '44px', display: 'block', marginBottom: '10px', color: 'var(--accent-30)' }}>receipt_long</span>
-          Aucune vente sur cette période.
+          {periode === 'credit' ? 'Aucun reste à encaisser. 🎉' : 'Aucune vente sur cette période.'}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -141,7 +176,7 @@ export default function MesVentes({ isMobile, vendeuseNom, enAttente, rafraichir
             const ouvert = ouverte === v.id;
             return (
               <div key={v.id} style={{ borderRadius: '16px', background: 'var(--surface)', border: '1px solid var(--line)', opacity: v.annulee ? 0.6 : 1, overflow: 'hidden' }}>
-                <div onClick={() => setOuverte(ouvert ? null : v.id)} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 16px', cursor: 'pointer' }}>
+                <div onClick={() => ouvrir(ouvert ? null : v)} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 16px', cursor: 'pointer' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: '14.5px', fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: v.annulee ? 'line-through' : undefined }}>{v.clienteNom || 'Cliente'}</div>
                     <div style={{ fontSize: '12px', color: 'var(--ink-45)' }}>
@@ -170,6 +205,23 @@ export default function MesVentes({ isMobile, vendeuseNom, enAttente, rafraichir
                         <span>{p.montant.toLocaleString()} FCFA</span>
                       </div>
                     ))}
+                    {!v.annulee && Number(v.reste_a_payer) > 0 && (
+                      <div style={{ marginTop: '12px', padding: '12px', borderRadius: '12px', background: 'var(--warn-tint)', border: '1px solid var(--warn-line)' }}>
+                        <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--ink)', marginBottom: '8px' }}>
+                          Encaisser un versement <span style={{ fontWeight: 500, color: 'var(--ink-55)' }}>· reste dû {Number(v.reste_a_payer).toLocaleString()} FCFA</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                          <input type="number" min="1" max={Number(v.reste_a_payer)} inputMode="numeric" aria-label="Montant reçu" placeholder="Montant reçu" value={montantVersement} onChange={e => setMontantVersement(e.target.value === '' ? '' : Number(e.target.value))} style={{ flex: '1 1 120px', minWidth: 0, height: '42px', padding: '0 12px', borderRadius: '10px', background: 'var(--surface)', border: '1px solid var(--line)', outline: 'none', color: 'var(--ink)', fontSize: '14px' }} />
+                          <select value={modeVersement} onChange={e => setModeVersement(e.target.value)} aria-label="Mode de paiement" style={{ flex: '0 1 150px', height: '42px', padding: '0 8px', borderRadius: '10px', border: '1px solid var(--line)', background: 'var(--surface)', color: 'var(--ink)', fontSize: '13.5px', outline: 'none' }}>
+                            {MODES.map(([val, label]) => <option key={val} value={val}>{label}</option>)}
+                          </select>
+                          <button onClick={() => encaisser(v)} disabled={encaissement} style={{ flex: '1 1 120px', height: '42px', borderRadius: '10px', border: 'none', cursor: encaissement ? 'default' : 'pointer', background: 'var(--accent-grad)', color: 'var(--on-accent)', fontSize: '14px', fontWeight: 700, opacity: encaissement ? 0.6 : 1 }}>
+                            {encaissement ? 'Encaissement…' : 'Encaisser'}
+                          </button>
+                        </div>
+                        {erreurVersement && <div role="alert" style={{ marginTop: '8px', fontSize: '12.5px', color: 'var(--danger)', fontWeight: 600 }}>{erreurVersement}</div>}
+                      </div>
+                    )}
                     {!v.annulee && (
                       <button onClick={() => onRecu(recuDepuisVente({ ...v, vendeuseNom, items: v.lignes, mode: v.paiements[0]?.mode }))} style={{ marginTop: '12px', width: '100%', height: '44px', borderRadius: '12px', cursor: 'pointer', background: 'var(--accent-12)', border: '1px solid var(--accent-25)', color: 'var(--accent-deep)', fontSize: '14px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
                         <span className="ms" style={{ fontSize: '19px' }}>receipt_long</span>Renvoyer le reçu

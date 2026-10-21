@@ -6,6 +6,7 @@
 // verrouille, prix recalcules) — une vente peut donc etre refusee a l'envoi.
 
 export type PayloadVente = {
+  cliente_id?: number | null; // cliente existante choisie dans les suggestions
   cliente_nom: string;
   cliente_telephone: string | null;
   produits: { produit_id: number; quantite: number }[];
