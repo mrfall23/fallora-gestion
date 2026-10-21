@@ -10,6 +10,10 @@ import { type RecuData } from '../components/Recu';
 import RecuModal from '../components/RecuModal';
 import MesVentes from './MesVentes';
 import { lireFile, ecrireFile, ajouterAFile, nouvelId, type PayloadVente } from '@/lib/fileHorsLigne';
+import { normaliserTel, sansAccents } from '@/lib/recherche';
+
+type ClienteConnue = { id: number; nom: string; telephone: string | null };
+const CLIENTE_VIDE = { id: null as number | null, nom: '', telephone: '' };
 
 const inputStyle: React.CSSProperties = { height: '44px', padding: '0 14px', borderRadius: '12px', background: 'var(--surface-inset)', border: '1px solid var(--line)', outline: 'none', color: 'var(--ink)', fontSize: '14px', width: '100%' };
 
@@ -18,7 +22,10 @@ export default function VendeusePage() {
   const isMobile = useIsMobile();
   const [produits, setProduits] = useState<any[]>([]);
   const [panier, setPanier] = useState<any[]>([]);
-  const [cliente, setCliente] = useState({ nom: '', telephone: '' });
+  const [cliente, setCliente] = useState(CLIENTE_VIDE);
+  const [clientesConnues, setClientesConnues] = useState<ClienteConnue[]>([]);
+  const [suggestionsOuvertes, setSuggestionsOuvertes] = useState(false);
+  const [recherche, setRecherche] = useState('');
   const [modePaiement, setModePaiement] = useState('cash');
   const [montantPaye, setMontantPaye] = useState<number | ''>('');
   const [statutPaiement, setStatutPaiement] = useState<'paye' | 'partiel'>('paye');
@@ -39,7 +46,7 @@ export default function VendeusePage() {
 
   // La redirection si non connecte est prise en charge par useUtilisateur().
   useEffect(() => {
-    chargerProduits(); chargerObjectif();
+    chargerProduits(); chargerObjectif(); chargerClientes();
     setEnLigne(navigator.onLine);
     setNbEnAttente(lireFile().length);
     const auRetour = () => { setEnLigne(true); synchroniser(); };
@@ -75,7 +82,7 @@ export default function VendeusePage() {
       setNbEnAttente(restants.length);
       if (refuses.length > 0) setErreur(`${refuses.length} vente(s) hors ligne non enregistrée(s) — ${refuses.join(' ; ')}`);
       await chargerProduits();
-      chargerObjectif(); setVersionHisto(x => x + 1);
+      chargerObjectif(); chargerClientes(); setVersionHisto(x => x + 1);
     } finally {
       syncRef.current = false; setSynchro(false);
     }
@@ -85,6 +92,17 @@ export default function VendeusePage() {
     const { data } = await supabase.from('produits').select('*').eq('actif', true).order('nom');
     setProduits(data || []);
     setChargement(false);
+  };
+
+  // Fichier clientes (pot commun, lisible par toute vendeuse connectee) pour
+  // les suggestions : retrouver une cliente au lieu de creer un doublon.
+  const chargerClientes = async () => {
+    try {
+      const data = await toutLire<ClienteConnue>(() => supabase.from('clientes').select('id, nom, telephone').order('id'));
+      setClientesConnues(data);
+    } catch {
+      // hors ligne : on garde la liste deja chargee
+    }
   };
 
   // Objectif du mois de la vendeuse + son realise (RLS : ne renvoie que les siens).
@@ -125,6 +143,21 @@ export default function VendeusePage() {
   const resteAPayer = Math.max(0, total - montantEffectif);
   const nbArticles = panier.reduce((s, p) => s + p.quantite, 0);
 
+  const rechercheNorm = sansAccents(recherche);
+  const produitsAffiches = rechercheNorm
+    ? produits.filter(p => sansAccents(p.nom).includes(rechercheNorm) || sansAccents(p.description).includes(rechercheNorm))
+    : produits;
+
+  // Suggestions : nom (sans accents) ou numero (normalise) deja connus.
+  const nomNorm = sansAccents(cliente.nom);
+  const telNorm = normaliserTel(cliente.telephone);
+  const suggestions = cliente.id || (nomNorm.length < 2 && telNorm.length < 3) ? [] : clientesConnues
+    .filter(c => (nomNorm.length >= 2 && sansAccents(c.nom).includes(nomNorm)) || (telNorm.length >= 3 && normaliserTel(c.telephone).includes(telNorm)))
+    .slice(0, 6);
+  // Numero complet deja attribue : la vente ira sur cette fiche de toute facon.
+  const ficheDuNumero = !cliente.id && telNorm.length >= 9 ? clientesConnues.find(c => normaliserTel(c.telephone) === telNorm) : undefined;
+  const choisirCliente = (c: ClienteConnue) => { setCliente({ id: c.id, nom: c.nom, telephone: c.telephone || '' }); setSuggestionsOuvertes(false); };
+
   // Toute la vente part en un seul appel a enregistrer_vente(), executee en
   // une transaction cote base. Avant, c'etaient 5 inserts separes depuis le
   // navigateur : un echec en cours de route laissait une vente sans produits.
@@ -136,6 +169,7 @@ export default function VendeusePage() {
     if (!cliente.nom.trim()) { setErreur('Entrez le nom de la cliente.'); return; }
     if (statutPaiement === 'partiel' && (!montantPaye || montantPayeNum <= 0)) { setErreur('Entrez le montant payé.'); return; }
     const payload: PayloadVente = {
+      cliente_id: cliente.id,
       cliente_nom: cliente.nom,
       cliente_telephone: cliente.telephone || null,
       produits: panier.map(p => ({ produit_id: p.id, quantite: p.quantite })),
@@ -183,9 +217,9 @@ export default function VendeusePage() {
       });
 
       setSucces('Vente enregistrée avec succès !');
-      setPanier([]); setCliente({ nom: '', telephone: '' }); setMontantPaye(''); setStatutPaiement('paye'); setModePaiement('cash');
+      setPanier([]); setCliente(CLIENTE_VIDE); setSuggestionsOuvertes(false); setMontantPaye(''); setStatutPaiement('paye'); setModePaiement('cash');
       await chargerProduits();
-      chargerObjectif(); setVersionHisto(x => x + 1);
+      chargerObjectif(); chargerClientes(); setVersionHisto(x => x + 1);
       setTimeout(() => setSucces(''), 4000);
     } catch {
       // Echec RESEAU (fetch a jete) : on bascule en file d'attente plutot que
@@ -204,7 +238,7 @@ export default function VendeusePage() {
       return ligne ? { ...p, stock_restant: Math.max(0, p.stock_restant - ligne.quantite) } : p;
     }));
     setSucces('Vente enregistrée hors ligne — envoi automatique au retour du réseau.');
-    setPanier([]); setCliente({ nom: '', telephone: '' }); setMontantPaye(''); setStatutPaiement('paye'); setModePaiement('cash');
+    setPanier([]); setCliente(CLIENTE_VIDE); setSuggestionsOuvertes(false); setMontantPaye(''); setStatutPaiement('paye'); setModePaiement('cash');
     setTimeout(() => setSucces(''), 5000);
   };
 
@@ -295,11 +329,25 @@ export default function VendeusePage() {
             <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--ink)', marginBottom: '16px' }}>
               Sélectionner des articles <span style={{ fontSize: '13px', color: 'var(--ink-45)', fontWeight: 400 }}>({produits.filter(p => p.stock_restant > 0).length} disponibles)</span>
             </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '0 14px', height: '46px', borderRadius: '14px', background: 'var(--surface)', border: '1px solid var(--line)', marginBottom: '16px' }}>
+              <span className="ms" style={{ fontSize: '20px', color: 'var(--accent)' }}>search</span>
+              <input type="search" placeholder="Rechercher un article…" aria-label="Rechercher un article" value={recherche} onChange={e => setRecherche(e.target.value)} style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', outline: 'none', color: 'var(--ink)', fontSize: '14.5px' }} />
+              {recherche && (
+                <button onClick={() => setRecherche('')} aria-label="Effacer la recherche" style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--ink-45)', display: 'flex', padding: '4px' }}>
+                  <span className="ms" style={{ fontSize: '18px' }}>close</span>
+                </button>
+              )}
+            </div>
             {succes && (
               <div style={{ padding: '12px 16px', borderRadius: '12px', background: 'var(--success-tint)', border: '1px solid var(--success-line)', color: 'var(--success)', fontSize: '13.5px', textAlign: 'center', marginBottom: '16px', fontWeight: 600 }}>{succes}</div>
             )}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(170px,1fr))', gap: '14px' }}>
-              {produits.map(produit => {
+              {produitsAffiches.length === 0 && (
+                <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '40px 0', color: 'var(--ink-45)', fontSize: '13.5px' }}>
+                  Aucun article ne correspond à « {recherche} ».
+                </div>
+              )}
+              {produitsAffiches.map(produit => {
                 const dansLePanier = panier.find(p => p.id === produit.id);
                 const qte = dansLePanier?.quantite ?? 0;
                 const stockRestant = produit.stock_restant - qte;
@@ -377,10 +425,41 @@ export default function VendeusePage() {
 
             {/* Infos cliente */}
             <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '.5px', color: 'var(--ink-45)', textTransform: 'uppercase', marginBottom: '10px' }}>Informations cliente</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
-              <input style={inputStyle} placeholder="Nom de la cliente *" aria-label="Nom de la cliente" value={cliente.nom} onChange={e => setCliente({ ...cliente, nom: e.target.value })} />
-              <input style={inputStyle} placeholder="Téléphone (optionnel)" aria-label="Téléphone de la cliente" value={cliente.telephone} onChange={e => setCliente({ ...cliente, telephone: e.target.value })} />
-            </div>
+            {cliente.id ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', borderRadius: '12px', background: 'var(--success-tint)', border: '1px solid var(--success-line)', marginBottom: '16px' }}>
+                <span className="ms" style={{ fontSize: '20px', color: 'var(--success)' }}>how_to_reg</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cliente.nom}</div>
+                  <div style={{ fontSize: '12px', color: 'var(--ink-55)' }}>{cliente.telephone || 'Sans téléphone'} · cliente existante</div>
+                </div>
+                <button onClick={() => setCliente(CLIENTE_VIDE)} aria-label="Changer de cliente" style={{ background: 'transparent', border: '1px solid var(--line)', borderRadius: '9px', cursor: 'pointer', color: 'var(--ink-55)', fontSize: '12px', fontWeight: 600, padding: '6px 10px' }}>Changer</button>
+              </div>
+            ) : (
+              <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
+                <input style={inputStyle} placeholder="Nom de la cliente *" aria-label="Nom de la cliente" autoComplete="off" value={cliente.nom} onFocus={() => setSuggestionsOuvertes(true)} onChange={e => { setCliente({ ...cliente, nom: e.target.value }); setSuggestionsOuvertes(true); }} />
+                <input style={inputStyle} type="tel" placeholder="Téléphone (optionnel)" aria-label="Téléphone de la cliente" autoComplete="off" value={cliente.telephone} onFocus={() => setSuggestionsOuvertes(true)} onChange={e => { setCliente({ ...cliente, telephone: e.target.value }); setSuggestionsOuvertes(true); }} />
+                {ficheDuNumero && (
+                  <div style={{ fontSize: '12.5px', color: 'var(--ink-70)', padding: '8px 12px', borderRadius: '10px', background: 'var(--accent-12)', border: '1px solid var(--accent-25)' }}>
+                    Ce numéro appartient à <b>{ficheDuNumero.nom}</b> : la vente ira sur sa fiche.
+                  </div>
+                )}
+                {suggestionsOuvertes && suggestions.length > 0 && (
+                  <div role="listbox" aria-label="Clientes existantes" style={{ borderRadius: '12px', background: 'var(--surface)', border: '1px solid var(--accent-25)', boxShadow: 'var(--shadow-md)', overflow: 'hidden' }}>
+                    <div style={{ fontSize: '10.5px', fontWeight: 700, letterSpacing: '.5px', textTransform: 'uppercase', color: 'var(--ink-45)', padding: '8px 12px 4px' }}>Clientes existantes</div>
+                    {suggestions.map(c => (
+                      <button key={c.id} role="option" aria-selected={false} onClick={() => choisirCliente(c)} style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '9px 12px', background: 'transparent', border: 'none', borderTop: '1px solid var(--line-soft)', cursor: 'pointer', textAlign: 'left' }}>
+                        <span className="ms" style={{ fontSize: '18px', color: 'var(--accent)' }}>person</span>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: '13.5px', fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.nom}</span>
+                        <span style={{ fontSize: '12px', color: 'var(--ink-45)', whiteSpace: 'nowrap' }}>{c.telephone || 'sans tél.'}</span>
+                      </button>
+                    ))}
+                    <button onClick={() => setSuggestionsOuvertes(false)} style={{ width: '100%', padding: '8px 12px', background: 'var(--surface-inset)', border: 'none', borderTop: '1px solid var(--line-soft)', cursor: 'pointer', fontSize: '12px', fontWeight: 600, color: 'var(--ink-55)' }}>
+                      Nouvelle cliente — ignorer les suggestions
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Statut paiement */}
             <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>

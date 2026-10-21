@@ -29,7 +29,7 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ message: 'Non authentifie.' }, { status: 401 });
 
   const body = await request.json().catch(() => ({}));
-  const { cliente_nom, cliente_telephone, produits, statut_paiement, montant_paye, mode_paiement } = body;
+  const { cliente_id, cliente_nom, cliente_telephone, produits, statut_paiement, montant_paye, mode_paiement } = body;
 
   const { data: venteId, error } = await supabase.rpc('enregistrer_vente', {
     p_cliente_nom: cliente_nom,
@@ -38,6 +38,9 @@ export async function POST(request: Request) {
     p_statut_paiement: statut_paiement,
     p_montant_paye: montant_paye ?? null,
     p_mode_paiement: mode_paiement,
+    // Envoye seulement s'il existe : une vente sans cliente choisie reste
+    // compatible avec l'ancienne signature de la RPC.
+    ...(cliente_id ? { p_cliente_id: Number(cliente_id) } : {}),
   });
 
   if (error) {
