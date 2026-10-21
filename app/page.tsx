@@ -9,7 +9,35 @@ export default function LoginPage() {
   const [motDePasse, setMotDePasse] = useState('');
   const [erreur, setErreur] = useState('');
   const [chargement, setChargement] = useState(false);
+  const [modeOubli, setModeOubli] = useState(false);
+  const [lienEnvoye, setLienEnvoye] = useState(false);
   const router = useRouter();
+
+  // Envoie l'e-mail de reinitialisation. Le lien ramene sur
+  // /nouveau-mot-de-passe, qui doit figurer dans les « Redirect URLs »
+  // autorisees du projet Supabase (Authentication > URL Configuration).
+  const envoyerLien = async () => {
+    const adresse = email.trim().toLowerCase();
+    if (!adresse) { setErreur('Entrez votre adresse email.'); return; }
+    setErreur(''); setChargement(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(adresse, {
+      redirectTo: `${window.location.origin}/nouveau-mot-de-passe`,
+    });
+    setChargement(false);
+    // Meme message que le compte existe ou non : on ne revele pas quelles
+    // adresses ont un compte. Seule la limite d'envoi est signalee.
+    if (error && /rate|limit|seconds/i.test(error.message)) {
+      setErreur("Trop de demandes. Patientez quelques minutes avant de réessayer.");
+      return;
+    }
+    if (error && (!error.status || error.status >= 500)) {
+      setErreur("Impossible d'envoyer le lien. Vérifiez votre connexion et réessayez.");
+      return;
+    }
+    setLienEnvoye(true);
+  };
+
+  const basculerOubli = (oubli: boolean) => { setModeOubli(oubli); setErreur(''); setLienEnvoye(false); setMotDePasse(''); };
 
   const seConnecter = async () => {
     if (!email || !motDePasse) { setErreur('Veuillez remplir tous les champs.'); return; }
@@ -65,6 +93,41 @@ export default function LoginPage() {
           <FalloraLogo layout="stack" markSize={58} wordSize={40} tagline="Ventes privées d'exception" />
         </div>
 
+        {modeOubli ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+          <div style={{ fontSize: '14px', color: 'var(--ink-70)', lineHeight: 1.5, textAlign: 'center' }}>
+            {lienEnvoye
+              ? <>Si un compte existe pour <b style={{ color: 'var(--ink)' }}>{email.trim().toLowerCase()}</b>, un lien pour choisir un nouveau mot de passe vient d&apos;être envoyé. Ouvrez-le <b style={{ color: 'var(--ink)' }}>sur cet appareil</b>, dans ce navigateur. Pensez à regarder dans les spams.</>
+              : 'Entrez votre adresse email : vous recevrez un lien pour choisir un nouveau mot de passe.'}
+          </div>
+
+          {!lienEnvoye && (
+            <div>
+              <label htmlFor="email-oubli" style={{ display: 'block', fontSize: '12px', fontWeight: 600, letterSpacing: '.4px', color: 'var(--ink-55)', marginBottom: '8px' }}>ADRESSE EMAIL</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '0 16px', height: '52px', borderRadius: '14px', background: 'var(--surface-inset)', border: '1px solid var(--line)' }}>
+                <span className="ms" style={{ fontSize: '20px', color: 'var(--accent)' }}>mail</span>
+                <input id="email-oubli" type="email" placeholder="votre@email.com" value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && envoyerLien()} style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--ink)', fontSize: '15px' }} />
+              </div>
+            </div>
+          )}
+
+          {erreur && (
+            <div style={{ padding: '12px 16px', borderRadius: '12px', background: 'var(--danger-tint)', border: '1px solid var(--danger-line)', color: 'var(--danger)', fontSize: '13.5px', textAlign: 'center' }}>
+              {erreur}
+            </div>
+          )}
+
+          {!lienEnvoye && (
+            <button onClick={envoyerLien} disabled={chargement} style={{ marginTop: '6px', height: '54px', border: 'none', borderRadius: '15px', cursor: chargement ? 'not-allowed' : 'pointer', background: chargement ? 'var(--accent-30)' : 'var(--accent-grad)', color: 'var(--on-accent)', fontSize: '15.5px', fontWeight: 700, letterSpacing: '.3px', boxShadow: 'var(--shadow-accent)' }}>
+              {chargement ? 'Envoi...' : 'Envoyer le lien'}
+            </button>
+          )}
+
+          <button onClick={() => basculerOubli(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--accent-deep)', fontSize: '13.5px', fontWeight: 600 }}>
+            ← Retour à la connexion
+          </button>
+        </div>
+        ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
           <div>
             <label htmlFor="email" style={{ display: 'block', fontSize: '12px', fontWeight: 600, letterSpacing: '.4px', color: 'var(--ink-55)', marginBottom: '8px' }}>ADRESSE EMAIL</label>
@@ -91,7 +154,12 @@ export default function LoginPage() {
           <button onClick={seConnecter} disabled={chargement} style={{ marginTop: '6px', height: '54px', border: 'none', borderRadius: '15px', cursor: chargement ? 'not-allowed' : 'pointer', background: chargement ? 'var(--accent-30)' : 'var(--accent-grad)', color: 'var(--on-accent)', fontSize: '15.5px', fontWeight: 700, letterSpacing: '.3px', boxShadow: 'var(--shadow-accent)' }}>
             {chargement ? 'Connexion...' : 'Se connecter'}
           </button>
+
+          <button onClick={() => basculerOubli(true)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--accent-deep)', fontSize: '13.5px', fontWeight: 600 }}>
+            Mot de passe oublié ?
+          </button>
         </div>
+        )}
       </div>
     </div>
   );
