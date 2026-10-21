@@ -19,7 +19,7 @@ const champ: React.CSSProperties = { height: '42px', padding: '0 12px', borderRa
 type Ligne = { nom: string; quantite: number; prix: number };
 type Paiement = { id: number; montant: number; mode: string; date_paiement: string };
 type Vente = {
-  id: number; date_vente: string; total: number; montant_paye: number; reste_a_payer: number; statut_paiement: string;
+  id: number; date_vente: string; total: number; remise: number | null; remise_motif: string | null; montant_paye: number; reste_a_payer: number; statut_paiement: string;
   annulee: boolean; annulee_le: string | null; motif_annulation: string | null; vendeuse_id: number | null;
   clienteNom: string | null; clienteTelephone: string | null; vendeuseNom: string | null;
   lignes: Ligne[]; paiements: Paiement[];
@@ -264,6 +264,11 @@ export default function AdminVentes() {
                       <span style={{ color: 'var(--ink-70)', whiteSpace: 'nowrap' }}>{(l.quantite * l.prix).toLocaleString()} FCFA</span>
                     </div>
                   ))}
+                  {Number(v.remise) > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', fontSize: '13px', paddingTop: '6px', color: 'var(--accent-deep)', fontWeight: 600 }}>
+                      <span>Remise{v.remise_motif ? ` · ${v.remise_motif}` : ''}</span><span>−{Number(v.remise).toLocaleString()} FCFA</span>
+                    </div>
+                  )}
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', fontWeight: 700, paddingTop: '8px', color: 'var(--ink)' }}>
                     <span>Total</span><span>{Number(v.total).toLocaleString()} FCFA</span>
                   </div>

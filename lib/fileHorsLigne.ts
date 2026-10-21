@@ -13,6 +13,8 @@ export type PayloadVente = {
   statut_paiement: 'paye' | 'partiel';
   montant_paye: number | null;
   mode_paiement: string;
+  remise?: number;            // FCFA, sur l'ensemble de la vente
+  remise_motif?: string | null;
 };
 
 export type VenteEnAttente = {

@@ -27,6 +27,11 @@ export default function VendeusePage() {
   const [clientesConnues, setClientesConnues] = useState<ClienteConnue[]>([]);
   const [suggestionsOuvertes, setSuggestionsOuvertes] = useState(false);
   const [recherche, setRecherche] = useState('');
+  const [remiseOuverte, setRemiseOuverte] = useState(false);
+  const [remiseMode, setRemiseMode] = useState<'fcfa' | 'pct'>('fcfa');
+  const [remiseSaisie, setRemiseSaisie] = useState<number | ''>('');
+  const [remiseMotif, setRemiseMotif] = useState('');
+  const [remiseMaxPct, setRemiseMaxPct] = useState(0);
   const [modePaiement, setModePaiement] = useState('cash');
   const [montantPaye, setMontantPaye] = useState<number | ''>('');
   const [statutPaiement, setStatutPaiement] = useState<'paye' | 'partiel'>('paye');
@@ -47,7 +52,7 @@ export default function VendeusePage() {
 
   // La redirection si non connecte est prise en charge par useUtilisateur().
   useEffect(() => {
-    chargerProduits(); chargerObjectif(); chargerClientes();
+    chargerProduits(); chargerObjectif(); chargerClientes(); chargerReglages();
     setEnLigne(navigator.onLine);
     setNbEnAttente(lireFile().length);
     const auRetour = () => { setEnLigne(true); synchroniser(); };
@@ -107,6 +112,12 @@ export default function VendeusePage() {
   };
 
   // Objectif du mois de la vendeuse + son realise (RLS : ne renvoie que les siens).
+  // Plafond de remise fixe par l'admin (la base le reverifie a l'envoi).
+  const chargerReglages = async () => {
+    const { data } = await supabase.from('reglages').select('remise_max_pct').eq('id', 1).maybeSingle();
+    if (data) setRemiseMaxPct(Number(data.remise_max_pct) || 0);
+  };
+
   const chargerObjectif = async () => {
     const n = new Date();
     const debutMois = new Date(n.getFullYear(), n.getMonth(), 1);
@@ -136,9 +147,18 @@ export default function VendeusePage() {
     else setPanier(panier.map(p => p.id === id ? { ...p, quantite: p.quantite - 1 } : p));
   };
 
+  const fermerRemise = () => { setRemiseOuverte(false); setRemiseSaisie(''); setRemiseMotif(''); setRemiseMode('fcfa'); };
+
   const supprimerDuPanier = (id: number) => setPanier(panier.filter(p => p.id !== id));
 
-  const total = panier.reduce((s, p) => s + p.prix * p.quantite, 0);
+  const sousTotal = panier.reduce((s, p) => s + p.prix * p.quantite, 0);
+  const remiseNum = Number(remiseSaisie) || 0;
+  const remise = !remiseOuverte || remiseNum <= 0 ? 0
+    : Math.round(remiseMode === 'pct' ? sousTotal * remiseNum / 100 : remiseNum);
+  const estAdmin = user?.role === 'admin';
+  // Meme arrondi que la base : floor(sous-total x plafond / 100).
+  const remiseMax = estAdmin ? sousTotal : Math.floor(sousTotal * remiseMaxPct / 100);
+  const total = Math.max(0, sousTotal - remise);
   const montantPayeNum = Number(montantPaye) || 0;
   const montantEffectif = statutPaiement === 'paye' ? total : montantPayeNum;
   const resteAPayer = Math.max(0, total - montantEffectif);
@@ -169,6 +189,8 @@ export default function VendeusePage() {
     if (panier.length === 0) { setErreur('Ajoutez des produits au panier.'); return; }
     if (!cliente.nom.trim()) { setErreur('Entrez le nom de la cliente.'); return; }
     if (statutPaiement === 'partiel' && (!montantPaye || montantPayeNum <= 0)) { setErreur('Entrez le montant payé.'); return; }
+    if (remise > sousTotal) { setErreur('La remise dépasse le montant de la vente.'); return; }
+    if (remise > remiseMax) { setErreur(`Remise maximum autorisée : ${remiseMaxPct} % (${remiseMax.toLocaleString()} FCFA).`); return; }
     const payload: PayloadVente = {
       cliente_id: cliente.id,
       cliente_nom: cliente.nom,
@@ -177,6 +199,7 @@ export default function VendeusePage() {
       statut_paiement: statutPaiement,
       montant_paye: statutPaiement === 'paye' ? null : montantPayeNum,
       mode_paiement: modePaiement,
+      ...(remise > 0 ? { remise, remise_motif: remiseMotif.trim() || null } : {}),
     };
     setErreur(''); setEnregistrement(true);
 
@@ -211,6 +234,7 @@ export default function VendeusePage() {
         telephone: cliente.telephone || null,
         items: panier.map(p => ({ nom: p.nom, quantite: p.quantite, prix: p.prix })),
         total,
+        remise,
         paye: montantEffectif,
         reste: resteAPayer,
         mode: modePaiement,
@@ -218,7 +242,7 @@ export default function VendeusePage() {
       });
 
       setSucces('Vente enregistrée avec succès !');
-      setPanier([]); setCliente(CLIENTE_VIDE); setSuggestionsOuvertes(false); setMontantPaye(''); setStatutPaiement('paye'); setModePaiement('cash');
+      setPanier([]); setCliente(CLIENTE_VIDE); setSuggestionsOuvertes(false); setMontantPaye(''); setStatutPaiement('paye'); setModePaiement('cash'); fermerRemise();
       await chargerProduits();
       chargerObjectif(); chargerClientes(); setVersionHisto(x => x + 1);
       setTimeout(() => setSucces(''), 4000);
@@ -239,7 +263,7 @@ export default function VendeusePage() {
       return ligne ? { ...p, stock_restant: Math.max(0, p.stock_restant - ligne.quantite) } : p;
     }));
     setSucces('Vente enregistrée hors ligne — envoi automatique au retour du réseau.');
-    setPanier([]); setCliente(CLIENTE_VIDE); setSuggestionsOuvertes(false); setMontantPaye(''); setStatutPaiement('paye'); setModePaiement('cash');
+    setPanier([]); setCliente(CLIENTE_VIDE); setSuggestionsOuvertes(false); setMontantPaye(''); setStatutPaiement('paye'); setModePaiement('cash'); fermerRemise();
     setTimeout(() => setSucces(''), 5000);
   };
 
@@ -503,8 +527,44 @@ export default function VendeusePage() {
               </div>
             )}
 
+            {/* Remise */}
+            {panier.length > 0 && (estAdmin || remiseMaxPct > 0) && (
+              remiseOuverte ? (
+                <div style={{ marginBottom: '14px', padding: '12px', borderRadius: '12px', background: 'var(--accent-12)', border: '1px solid var(--accent-25)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '.5px', color: 'var(--ink-55)', textTransform: 'uppercase' }}>Remise</span>
+                    <button onClick={fermerRemise} aria-label="Retirer la remise" style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--ink-45)', display: 'flex', padding: '2px' }}>
+                      <span className="ms" style={{ fontSize: '17px' }}>close</span>
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+                    <input type="number" min="0" inputMode="numeric" aria-label="Montant de la remise" placeholder="0" value={remiseSaisie} onChange={e => setRemiseSaisie(e.target.value === '' ? '' : Number(e.target.value))} style={{ ...inputStyle, flex: 1, minWidth: 0 }} />
+                    {([['fcfa', 'FCFA'], ['pct', '%']] as const).map(([val, label]) => (
+                      <button key={val} onClick={() => setRemiseMode(val)} style={{ width: '58px', height: '44px', borderRadius: '11px', cursor: 'pointer', fontSize: '13px', fontWeight: 700, border: `1px solid ${remiseMode === val ? 'var(--accent-30)' : 'var(--line)'}`, background: remiseMode === val ? 'var(--surface)' : 'transparent', color: remiseMode === val ? 'var(--accent-deep)' : 'var(--ink-45)' }}>{label}</button>
+                    ))}
+                  </div>
+                  <input style={inputStyle} placeholder="Motif (optionnel) : fidélité, défaut…" aria-label="Motif de la remise" value={remiseMotif} onChange={e => setRemiseMotif(e.target.value)} />
+                  <div style={{ fontSize: '12px', marginTop: '7px', fontWeight: 600, color: remise > remiseMax ? 'var(--danger)' : 'var(--ink-55)' }}>
+                    {remise > remiseMax
+                      ? `Trop élevée : maximum ${remiseMaxPct} % (${remiseMax.toLocaleString()} FCFA).`
+                      : estAdmin ? 'Aucun plafond pour l’administratrice.' : `Maximum autorisé : ${remiseMaxPct} % (${remiseMax.toLocaleString()} FCFA).`}
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => setRemiseOuverte(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '14px', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--accent-deep)', fontSize: '13px', fontWeight: 700 }}>
+                  <span className="ms" style={{ fontSize: '18px' }}>sell</span>Ajouter une remise
+                </button>
+              )
+            )}
+
             {/* Total */}
-            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '14px 0', marginBottom: '14px', borderTop: '1px solid var(--line)' }}>
+            {remise > 0 && (
+              <div style={{ borderTop: '1px solid var(--line)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13.5px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--ink-55)' }}><span>Sous-total</span><span>{sousTotal.toLocaleString()} FCFA</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--accent-deep)', fontWeight: 700 }}><span>Remise</span><span>−{remise.toLocaleString()} FCFA</span></div>
+              </div>
+            )}
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '14px 0', marginBottom: '14px', borderTop: remise > 0 ? 'none' : '1px solid var(--line)' }}>
               <span style={{ fontSize: '14px', color: 'var(--ink-55)' }}>Total</span>
               <span>
                 <span style={{ fontSize: '28px', fontWeight: 800, color: 'var(--ink)' }}>{total.toLocaleString()}</span>

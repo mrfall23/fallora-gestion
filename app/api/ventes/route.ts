@@ -29,7 +29,7 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ message: 'Non authentifie.' }, { status: 401 });
 
   const body = await request.json().catch(() => ({}));
-  const { cliente_id, cliente_nom, cliente_telephone, produits, statut_paiement, montant_paye, mode_paiement } = body;
+  const { cliente_id, cliente_nom, cliente_telephone, produits, statut_paiement, montant_paye, mode_paiement, remise, remise_motif } = body;
 
   const { data: venteId, error } = await supabase.rpc('enregistrer_vente', {
     p_cliente_nom: cliente_nom,
@@ -41,6 +41,7 @@ export async function POST(request: Request) {
     // Envoye seulement s'il existe : une vente sans cliente choisie reste
     // compatible avec l'ancienne signature de la RPC.
     ...(cliente_id ? { p_cliente_id: Number(cliente_id) } : {}),
+    ...(Number(remise) > 0 ? { p_remise: Number(remise), p_remise_motif: remise_motif || null } : {}),
   });
 
   if (error) {
@@ -55,7 +56,7 @@ export async function POST(request: Request) {
     const admin = clientAdmin();
     const { data: v } = await admin
       .from('ventes')
-      .select('total, montant_paye, reste_a_payer, statut_paiement, cliente_id, vendeuse_id')
+      .select('total, remise, montant_paye, reste_a_payer, statut_paiement, cliente_id, vendeuse_id')
       .eq('id', venteId)
       .single();
 
@@ -83,6 +84,7 @@ export async function POST(request: Request) {
             prix: Number(l.prix_unitaire) || 0,
           })),
           total: Number(v.total) || 0,
+          remise: Number(v.remise) || 0,
           paye: Number(v.montant_paye) || 0,
           reste: Number(v.reste_a_payer) || 0,
           mode: mode_paiement || 'cash',
