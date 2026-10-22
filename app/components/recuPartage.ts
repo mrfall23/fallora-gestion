@@ -8,7 +8,7 @@ const fmt = (n: number) => n.toLocaleString('fr-FR');
 export function texteRecu(d: RecuData): string {
   const lignes = d.items.map(it => `• ${it.quantite}× ${it.nom} : ${fmt(it.prix * it.quantite)}`).join('\n');
   const reste = d.reste > 0 ? `\nReste à payer : ${fmt(d.reste)} FCFA` : '';
-  return `*${d.boutique}* — Reçu ${d.numero}\n${d.date}\nClient : ${d.client}\n\n${lignes}\n\n*TOTAL : ${fmt(d.total)} FCFA*\nPayé (${MODE[d.mode] || d.mode}) : ${fmt(d.paye)} FCFA${reste}\n\nMerci de votre achat 💛`;
+  return `*${d.boutique}* — Reçu ${d.numero}\n${d.date}\nClient : ${d.client}\n\n${lignes}\n\n${d.remise ? `Sous-total : ${fmt(d.total + d.remise)} FCFA\nRemise : −${fmt(d.remise)} FCFA\n` : ''}*TOTAL : ${fmt(d.total)} FCFA*\nPayé (${MODE[d.mode] || d.mode}) : ${fmt(d.paye)} FCFA${reste}\n\nMerci de votre achat 💛`;
 }
 
 /**

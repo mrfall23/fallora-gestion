@@ -62,7 +62,8 @@ export default function AdminRapports() {
   };
   const parProduit = () => {
     const map: Record<string, { quantite: number; total: number }> = {};
-    ventesFiltrees.forEach(v => v.vente_produits?.forEach((vp: any) => { const nom = vp.produits?.nom || 'Inconnu'; if (!map[nom]) map[nom] = { quantite: 0, total: 0 }; map[nom].quantite += vp.quantite; map[nom].total += vp.prix_unitaire * vp.quantite; }));
+    // Remise d'une vente repartie au prorata de ses lignes (total = sous-total - remise).
+    ventesFiltrees.forEach(v => { const coef = Number(v.remise) > 0 ? v.total / (v.total + Number(v.remise)) : 1; v.vente_produits?.forEach((vp: any) => { const nom = vp.produits?.nom || 'Inconnu'; if (!map[nom]) map[nom] = { quantite: 0, total: 0 }; map[nom].quantite += vp.quantite; map[nom].total += Math.round(vp.prix_unitaire * vp.quantite * coef); }); });
     return Object.entries(map).map(([nom, s]) => ({ nom, ...s })).sort((a, b) => b.quantite - a.quantite);
   };
   const parMode = () => {

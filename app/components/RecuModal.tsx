@@ -47,7 +47,7 @@ export default function RecuModal({ data, onClose, libelleFermer = 'Fermer', onE
 // Reçu reconstruit a partir d'une vente enregistree (meme numerotation que
 // l'espace vendeuse : annee-id). Reflete l'etat ACTUEL : acomptes inclus.
 export function recuDepuisVente(v: {
-  id: number; date_vente: string; total: number; montant_paye: number; reste_a_payer: number; statut_paiement: string;
+  id: number; date_vente: string; total: number; remise?: number | null; montant_paye: number; reste_a_payer: number; statut_paiement: string;
   vendeuseNom?: string | null; clienteNom?: string | null; clienteTelephone?: string | null;
   items: { nom: string; quantite: number; prix: number }[]; mode?: string | null;
 }): RecuData {
@@ -61,6 +61,7 @@ export function recuDepuisVente(v: {
     telephone: v.clienteTelephone || null,
     items: v.items,
     total: Number(v.total) || 0,
+    remise: Number(v.remise) || 0,
     paye: Number(v.montant_paye) || 0,
     reste: Number(v.reste_a_payer) || 0,
     mode: v.mode || 'cash',

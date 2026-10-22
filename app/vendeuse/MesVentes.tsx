@@ -15,7 +15,7 @@ const PAR_PAGE = 30;
 
 type Ligne = { nom: string; quantite: number; prix: number };
 type Vente = {
-  id: number; date_vente: string; total: number; montant_paye: number; reste_a_payer: number; statut_paiement: string;
+  id: number; date_vente: string; total: number; remise: number | null; remise_motif: string | null; montant_paye: number; reste_a_payer: number; statut_paiement: string;
   annulee: boolean; clienteNom: string | null; clienteTelephone: string | null;
   lignes: Ligne[]; paiements: { id: number; montant: number; mode: string; date_paiement: string }[];
 };
@@ -79,7 +79,7 @@ export default function MesVentes({ isMobile, vendeuseNom, enAttente, rafraichir
       try {
         const debut = debutPeriode(periode);
         const ventesData = await toutLire(() => {
-          let q = supabase.from('ventes').select('id, date_vente, total, montant_paye, reste_a_payer, statut_paiement, annulee, cliente_id');
+          let q = supabase.from('ventes').select('id, date_vente, total, remise, remise_motif, montant_paye, reste_a_payer, statut_paiement, annulee, cliente_id');
           // « À encaisser » : toutes les ventes avec un reste du, quelle que soit la date.
           if (periode === 'credit') q = q.eq('annulee', false).gt('reste_a_payer', 0);
           else if (debut) q = q.gte('date_vente', debut.toISOString());
@@ -199,6 +199,12 @@ export default function MesVentes({ isMobile, vendeuseNom, enAttente, rafraichir
                         <span style={{ color: 'var(--ink-70)', whiteSpace: 'nowrap' }}>{(l.quantite * l.prix).toLocaleString()} FCFA</span>
                       </div>
                     ))}
+                    {Number(v.remise) > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', fontSize: '13px', padding: '7px 0', borderBottom: '1px dashed var(--line)', color: 'var(--accent-deep)', fontWeight: 600 }}>
+                        <span>Remise{v.remise_motif ? ` · ${v.remise_motif}` : ''}</span>
+                        <span style={{ whiteSpace: 'nowrap' }}>−{Number(v.remise).toLocaleString()} FCFA</span>
+                      </div>
+                    )}
                     {v.paiements.map(p => (
                       <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', fontSize: '12.5px', paddingTop: '6px', color: 'var(--ink-55)' }}>
                         <span>Payé le {new Date(p.date_paiement).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })} · {MODE_LABELS[p.mode] || p.mode}</span>

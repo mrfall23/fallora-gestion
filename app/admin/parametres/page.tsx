@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import AlertesTelegram from '../../components/AlertesTelegram';
+import RemiseMax from '../../components/RemiseMax';
 
 // Plus de mot_de_passe : les mots de passe vivent dans auth.users, haches
 // par Supabase. L'app ne peut plus les lire, et c'est le but.
@@ -98,6 +99,7 @@ export default function AdminParametres() {
   return (
     <div className="fade-up">
       <AlertesTelegram />
+      <RemiseMax />
 
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: '16px', marginBottom: '24px' }}>

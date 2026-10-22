@@ -48,6 +48,7 @@ export type VenteAlerte = {
   telephone: string | null;
   articles: { nom: string; quantite: number; prix: number }[];
   total: number;
+  remise?: number;
   paye: number;
   reste: number;
   mode: string;
@@ -65,6 +66,7 @@ export function texteVente(v: VenteAlerte, siteUrl: string): string {
     '',
     ...v.articles.map(a => `• ${a.quantite} × ${a.nom} — ${fcfa(a.prix * a.quantite)}`),
     '',
+    ...(v.remise ? [`🏷️ Remise : −${fcfa(v.remise)}`] : []),
     `💰 Total : ${fcfa(v.total)}`,
     v.reste > 0
       ? `⚠️ Payé ${fcfa(v.paye)} (${MODES[v.mode] || v.mode}) · Reste dû ${fcfa(v.reste)}`

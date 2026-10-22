@@ -13,6 +13,7 @@ export type RecuData = {
   telephone?: string | null;
   items: { nom: string; quantite: number; prix: number }[];
   total: number;
+  remise?: number;   // FCFA ; le sous-total vaut total + remise
   paye: number;
   reste: number;
   mode: string;      // cash | mobile_money | orange_money
@@ -60,6 +61,14 @@ export default function Recu({ data }: { data: RecuData }) {
 
       {/* Totaux */}
       <div style={{ padding: '14px 0 4px' }}>
+        {data.remise ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '12.5px', marginBottom: '10px' }}>
+            <Ligne label="Sous-total" val={`${fmt(data.total + data.remise)} FCFA`} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', color: '#A9673D', fontWeight: 700 }}>
+              <span>Remise</span><span>−{fmt(data.remise)} FCFA</span>
+            </div>
+          </div>
+        ) : null}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
           <span style={{ fontSize: '14px', fontWeight: 700 }}>TOTAL</span>
           <span>
