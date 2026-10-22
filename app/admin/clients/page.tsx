@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { toutLire, lireParIds } from '@/lib/requetes';
 import { useIsMobile } from '../../components/useMediaQuery';
+import { normaliserTel, sansAccents } from '@/lib/recherche';
 
 type Cliente = { id: number; nom: string; telephone: string | null; created_at: string; nbVentes: number; totalDepense: number; resteAPayer: number; derniereVisite: string | null };
 
@@ -30,6 +31,18 @@ export default function AdminClients() {
   const [modeAcompte, setModeAcompte] = useState('cash');
   const [enregistrement, setEnregistrement] = useState(false);
   const [erreurAcompte, setErreurAcompte] = useState('');
+  // Modification / fusion de la fiche selectionnee.
+  const [edition, setEdition] = useState(false);
+  const [formNom, setFormNom] = useState('');
+  const [formTel, setFormTel] = useState('');
+  const [fusionOuverte, setFusionOuverte] = useState(false);
+  const [rechercheFusion, setRechercheFusion] = useState('');
+  const [cibleFusion, setCibleFusion] = useState<Cliente | null>(null);
+  const [garderSelectee, setGarderSelectee] = useState(true); // true = on garde la fiche ouverte
+  const [erreurFiche, setErreurFiche] = useState('');
+  const [messageFiche, setMessageFiche] = useState('');
+  const [operationFiche, setOperationFiche] = useState(false);
+  const [voirDoublons, setVoirDoublons] = useState(false);
   const isMobile = useIsMobile();
 
   useEffect(() => { chargerClientes(); }, []);
@@ -63,6 +76,7 @@ export default function AdminClients() {
     if (clienteSelectee?.id === c.id) { setClienteSelectee(null); setVentesCliente([]); return; }
     setClienteSelectee(c);
     setVenteEncaisse(null); setErreurAcompte('');
+    fermerOutilsFiche();
     await chargerVentesDetail(c.id);
   };
 
@@ -88,6 +102,40 @@ export default function AdminClients() {
     if (clienteSelectee) await chargerVentesDetail(clienteSelectee.id);
   };
 
+  const fermerOutilsFiche = () => { setEdition(false); setFusionOuverte(false); setCibleFusion(null); setRechercheFusion(''); setErreurFiche(''); setMessageFiche(''); };
+
+  const ouvrirEdition = (c: Cliente) => { fermerOutilsFiche(); setFormNom(c.nom); setFormTel(c.telephone || ''); setEdition(true); };
+
+  // Recharge la liste et rouvre la fiche indiquee (ou ferme le detail).
+  const rafraichirApres = async (idAOuvrir: number | null) => {
+    const liste = await chargerClientes();
+    const maj = idAOuvrir !== null ? liste.find(x => x.id === idAOuvrir) || null : null;
+    setClienteSelectee(maj);
+    if (maj) await chargerVentesDetail(maj.id); else setVentesCliente([]);
+  };
+
+  const enregistrerFiche = async (c: Cliente) => {
+    if (!formNom.trim()) { setErreurFiche('Le nom est obligatoire.'); return; }
+    setOperationFiche(true); setErreurFiche('');
+    const { error } = await supabase.rpc('modifier_cliente', { p_id: c.id, p_nom: formNom, p_telephone: formTel.trim() || null });
+    setOperationFiche(false);
+    if (error) { setErreurFiche(error.message || 'Enregistrement impossible.'); return; }
+    fermerOutilsFiche(); setMessageFiche('Fiche mise à jour.');
+    await rafraichirApres(c.id);
+  };
+
+  const fusionner = async (c: Cliente, autre: Cliente) => {
+    const garder = garderSelectee ? c : autre;
+    const absorber = garderSelectee ? autre : c;
+    setOperationFiche(true); setErreurFiche('');
+    const { data, error } = await supabase.rpc('fusionner_clientes', { p_garder: garder.id, p_absorber: absorber.id });
+    setOperationFiche(false);
+    if (error) { setErreurFiche(error.message || 'Fusion impossible.'); return; }
+    fermerOutilsFiche();
+    setMessageFiche(`Fiches fusionnées : ${Number(data) || 0} vente(s) de « ${absorber.nom} » rattachée(s) à « ${garder.nom} ».`);
+    await rafraichirApres(garder.id);
+  };
+
   // Relance WhatsApp pre-remplie (numero camerounais local complete en 237).
   const relancer = (c: Cliente) => {
     let num = (c.telephone || '').replace(/[^0-9]/g, '');
@@ -96,10 +144,30 @@ export default function AdminClients() {
     window.open(num ? `https://wa.me/${num}?text=${texte}` : `https://wa.me/?text=${texte}`, '_blank');
   };
 
+  // Doublons probables : meme numero (normalise) ou meme nom (sans accents).
+  const cleTel = (c: Cliente) => { const t = normaliserTel(c.telephone); return t.length >= 9 ? `t:${t}` : ''; };
+  const cleNom = (c: Cliente) => { const n = sansAccents(c.nom).replace(/\s+/g, ' '); return n ? `n:${n}` : ''; };
+  const compte = new Map<string, number>();
+  clientes.forEach(c => [cleTel(c), cleNom(c)].filter(Boolean).forEach(k => compte.set(k, (compte.get(k) || 0) + 1)));
+  const cleDoublon = (c: Cliente) => [cleTel(c), cleNom(c)].find(k => k && (compte.get(k) || 0) > 1) || '';
+  const nbDoublons = clientes.filter(c => cleDoublon(c)).length;
+
+  const rechercheNorm = sansAccents(recherche);
+  const rechercheTel = normaliserTel(recherche);
   const filtrees = clientes
-    .filter(c => c.nom.toLowerCase().includes(recherche.toLowerCase()) || (c.telephone && c.telephone.includes(recherche)))
+    .filter(c => sansAccents(c.nom).includes(rechercheNorm) || (rechercheTel.length > 0 && normaliserTel(c.telephone).includes(rechercheTel)))
     .filter(c => !filtreDette || c.resteAPayer > 0)
-    .sort((a, b) => filtreDette ? b.resteAPayer - a.resteAPayer : 0);
+    .filter(c => !voirDoublons || cleDoublon(c))
+    .sort((a, b) => voirDoublons ? cleDoublon(a).localeCompare(cleDoublon(b)) : filtreDette ? b.resteAPayer - a.resteAPayer : 0);
+
+  const candidatsFusion = clienteSelectee ? clientes
+    .filter(c => c.id !== clienteSelectee.id)
+    .filter(c => {
+      const q = sansAccents(rechercheFusion), qt = normaliserTel(rechercheFusion);
+      if (!q) return cleDoublon(c) !== '' && cleDoublon(c) === cleDoublon(clienteSelectee);
+      return sansAccents(c.nom).includes(q) || (qt.length > 0 && normaliserTel(c.telephone).includes(qt));
+    })
+    .slice(0, 8) : [];
   const totalCA = clientes.reduce((s, c) => s + c.totalDepense, 0);
   const totalAttente = clientes.reduce((s, c) => s + c.resteAPayer, 0);
 
@@ -133,7 +201,15 @@ export default function AdminClients() {
         <button onClick={() => setFiltreDette(v => !v)} aria-pressed={filtreDette} style={{ display: 'flex', alignItems: 'center', gap: '8px', height: '48px', padding: '0 16px', borderRadius: '14px', cursor: 'pointer', fontSize: '13px', fontWeight: 700, background: filtreDette ? 'var(--warn-tint)' : 'var(--surface-inset)', color: filtreDette ? 'var(--warn)' : 'var(--ink-55)', border: `1px solid ${filtreDette ? 'var(--warn-line)' : 'var(--line)'}`, whiteSpace: 'nowrap' }}>
           <span className="ms" style={{ fontSize: '18px' }}>{filtreDette ? 'filter_alt' : 'filter_alt_off'}</span>À recouvrer
         </button>
+        {nbDoublons > 0 && (
+          <button onClick={() => setVoirDoublons(v => !v)} aria-pressed={voirDoublons} title="Fiches avec le même numéro ou le même nom" style={{ display: 'flex', alignItems: 'center', gap: '8px', height: '48px', padding: '0 16px', borderRadius: '14px', cursor: 'pointer', fontSize: '13px', fontWeight: 700, background: voirDoublons ? 'var(--accent-16)' : 'var(--surface-inset)', color: voirDoublons ? 'var(--accent-deep)' : 'var(--ink-55)', border: `1px solid ${voirDoublons ? 'var(--accent-30)' : 'var(--line)'}`, whiteSpace: 'nowrap' }}>
+            <span className="ms" style={{ fontSize: '18px' }}>content_copy</span>Doublons possibles ({nbDoublons})
+          </button>
+        )}
       </div>
+      {messageFiche && (
+        <div role="status" style={{ marginBottom: '14px', padding: '12px 16px', borderRadius: '12px', background: 'var(--success-tint)', border: '1px solid var(--success-line)', color: 'var(--success)', fontSize: '13.5px', fontWeight: 600 }}>{messageFiche}</div>
+      )}
 
       {/* 2-col layout */}
       <div style={{ display: 'grid', gridTemplateColumns: clienteSelectee && !isMobile ? '1fr 380px' : '1fr', gap: '16px', alignItems: 'start' }}>
@@ -201,6 +277,60 @@ export default function AdminClients() {
                   ) : <div style={{ fontSize: '12px', color: 'var(--ink-35)' }}>Pas de téléphone</div>}
                 </div>
               </div>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                {([['edit', 'Modifier', () => edition ? fermerOutilsFiche() : ouvrirEdition(clienteSelectee), edition], ['merge', 'Fusionner', () => { const o = !fusionOuverte; fermerOutilsFiche(); setFusionOuverte(o); setGarderSelectee(true); }, fusionOuverte]] as const).map(([icone, label, action, actif]) => (
+                  <button key={label} onClick={action} aria-pressed={actif} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', height: '36px', borderRadius: '10px', cursor: 'pointer', fontSize: '12.5px', fontWeight: 700, background: actif ? 'var(--accent)' : 'var(--surface)', color: actif ? 'var(--on-accent)' : 'var(--accent-deep)', border: `1px solid ${actif ? 'var(--accent)' : 'var(--accent-20)'}` }}>
+                    <span className="ms" style={{ fontSize: '16px' }}>{icone}</span>{label}
+                  </button>
+                ))}
+              </div>
+              {edition && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px', padding: '12px', borderRadius: '12px', background: 'var(--surface)', border: '1px solid var(--line)' }}>
+                  <input value={formNom} onChange={e => setFormNom(e.target.value)} aria-label="Nom de la cliente" placeholder="Nom *" style={{ height: '40px', padding: '0 12px', borderRadius: '10px', border: '1px solid var(--line)', background: 'var(--surface-inset)', color: 'var(--ink)', fontSize: '13.5px', outline: 'none' }} />
+                  <input value={formTel} onChange={e => setFormTel(e.target.value)} type="tel" aria-label="Téléphone de la cliente" placeholder="Téléphone (optionnel)" style={{ height: '40px', padding: '0 12px', borderRadius: '10px', border: '1px solid var(--line)', background: 'var(--surface-inset)', color: 'var(--ink)', fontSize: '13.5px', outline: 'none' }} />
+                  {erreurFiche && <div role="alert" style={{ fontSize: '12px', color: 'var(--danger)', fontWeight: 600 }}>{erreurFiche}</div>}
+                  <button onClick={() => enregistrerFiche(clienteSelectee)} disabled={operationFiche} style={{ height: '38px', borderRadius: '10px', cursor: operationFiche ? 'default' : 'pointer', fontSize: '13px', fontWeight: 700, background: 'var(--accent-grad)', color: 'var(--on-accent)', border: 'none', opacity: operationFiche ? 0.6 : 1 }}>{operationFiche ? '...' : 'Enregistrer'}</button>
+                </div>
+              )}
+              {fusionOuverte && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px', padding: '12px', borderRadius: '12px', background: 'var(--surface)', border: '1px solid var(--line)' }}>
+                  {!cibleFusion ? (
+                    <>
+                      <div style={{ fontSize: '12.5px', color: 'var(--ink-70)' }}>Avec quelle fiche fusionner « {clienteSelectee.nom} » ?</div>
+                      <input autoFocus value={rechercheFusion} onChange={e => setRechercheFusion(e.target.value)} aria-label="Rechercher la fiche à fusionner" placeholder="Nom ou téléphone…" style={{ height: '38px', padding: '0 12px', borderRadius: '10px', border: '1px solid var(--line)', background: 'var(--surface-inset)', color: 'var(--ink)', fontSize: '13px', outline: 'none' }} />
+                      {candidatsFusion.length === 0 ? (
+                        <div style={{ fontSize: '12px', color: 'var(--ink-45)' }}>{rechercheFusion ? 'Aucune fiche trouvée.' : 'Tapez un nom ou un numéro.'}</div>
+                      ) : candidatsFusion.map(c => (
+                        <button key={c.id} onClick={() => setCibleFusion(c)} style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', padding: '8px 10px', borderRadius: '9px', cursor: 'pointer', background: 'var(--surface-inset)', border: '1px solid var(--line)', textAlign: 'left', fontSize: '13px' }}>
+                          <span style={{ fontWeight: 600, color: 'var(--ink)' }}>{c.nom}</span>
+                          <span style={{ color: 'var(--ink-45)', whiteSpace: 'nowrap' }}>{c.telephone || 'sans tél.'} · {c.nbVentes} achat{c.nbVentes > 1 ? 's' : ''}</span>
+                        </button>
+                      ))}
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--ink)' }}>Quelle fiche garder ?</div>
+                      {[[true, clienteSelectee], [false, cibleFusion]].map(([garder, c]) => {
+                        const fiche = c as Cliente;
+                        return (
+                          <label key={fiche.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--ink)', cursor: 'pointer' }}>
+                            <input type="radio" name="garder" checked={garderSelectee === garder} onChange={() => setGarderSelectee(garder as boolean)} />
+                            <span><b>{fiche.nom}</b> <span style={{ color: 'var(--ink-45)' }}>{fiche.telephone || 'sans tél.'} · {fiche.nbVentes} achat{fiche.nbVentes > 1 ? 's' : ''}</span></span>
+                          </label>
+                        );
+                      })}
+                      <div style={{ fontSize: '12px', color: 'var(--ink-55)', lineHeight: 1.45 }}>
+                        Tous les achats de « {(garderSelectee ? cibleFusion : clienteSelectee).nom} » seront rattachés à « {(garderSelectee ? clienteSelectee : cibleFusion).nom} », puis sa fiche sera supprimée. Action définitive.
+                      </div>
+                      {erreurFiche && <div role="alert" style={{ fontSize: '12px', color: 'var(--danger)', fontWeight: 600 }}>{erreurFiche}</div>}
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button onClick={() => fusionner(clienteSelectee, cibleFusion)} disabled={operationFiche} style={{ flex: 1, height: '38px', borderRadius: '10px', cursor: operationFiche ? 'default' : 'pointer', fontSize: '13px', fontWeight: 700, background: 'var(--accent-grad)', color: 'var(--on-accent)', border: 'none', opacity: operationFiche ? 0.6 : 1 }}>{operationFiche ? '...' : 'Fusionner'}</button>
+                        <button onClick={() => { setCibleFusion(null); setErreurFiche(''); }} disabled={operationFiche} style={{ height: '38px', padding: '0 14px', borderRadius: '10px', cursor: 'pointer', fontSize: '13px', fontWeight: 600, background: 'var(--surface-inset)', color: 'var(--ink-55)', border: '1px solid var(--line)' }}>Retour</button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '8px' }}>
                 {[
                   { label: 'Achats', value: clienteSelectee.nbVentes.toString() },
