@@ -12,6 +12,7 @@ import MesVentes from './MesVentes';
 import ChangerMotDePasse from '../components/ChangerMotDePasse';
 import { lireFile, ecrireFile, ajouterAFile, nouvelId, type PayloadVente } from '@/lib/fileHorsLigne';
 import { normaliserTel, sansAccents } from '@/lib/recherche';
+import { grouperParModele, libelleVariante, categoriesDe } from '@/lib/variantes';
 
 type ClienteConnue = { id: number; nom: string; telephone: string | null };
 const CLIENTE_VIDE = { id: null as number | null, nom: '', telephone: '' };
@@ -27,6 +28,7 @@ export default function VendeusePage() {
   const [clientesConnues, setClientesConnues] = useState<ClienteConnue[]>([]);
   const [suggestionsOuvertes, setSuggestionsOuvertes] = useState(false);
   const [recherche, setRecherche] = useState('');
+  const [categorieSel, setCategorieSel] = useState('');
   const [remiseOuverte, setRemiseOuverte] = useState(false);
   const [remiseMode, setRemiseMode] = useState<'fcfa' | 'pct'>('fcfa');
   const [remiseSaisie, setRemiseSaisie] = useState<number | ''>('');
@@ -165,9 +167,12 @@ export default function VendeusePage() {
   const nbArticles = panier.reduce((s, p) => s + p.quantite, 0);
 
   const rechercheNorm = sansAccents(recherche);
-  const produitsAffiches = rechercheNorm
-    ? produits.filter(p => sansAccents(p.nom).includes(rechercheNorm) || sansAccents(p.description).includes(rechercheNorm))
-    : produits;
+  const categories = categoriesDe(produits);
+  const produitsAffiches = produits
+    .filter(p => !categorieSel || p.categorie === categorieSel)
+    .filter(p => !rechercheNorm || [p.nom, p.description, p.categorie, p.modele].some(t => sansAccents(t).includes(rechercheNorm)));
+  // Une carte par article : les tailles / couleurs d'un meme modele sont regroupees.
+  const groupes = grouperParModele(produitsAffiches);
 
   // Suggestions : nom (sans accents) ou numero (normalise) deja connus.
   const nomNorm = sansAccents(cliente.nom);
@@ -368,16 +373,73 @@ export default function VendeusePage() {
                 </button>
               )}
             </div>
+            {categories.length > 0 && (
+              <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px', marginBottom: '14px' }}>
+                {[['', 'Tout'], ...categories.map(c => [c, c])].map(([val, label]) => (
+                  <button key={val} onClick={() => setCategorieSel(val)} style={{ flexShrink: 0, height: '34px', padding: '0 14px', borderRadius: '20px', cursor: 'pointer', fontSize: '13px', fontWeight: 600, border: categorieSel === val ? 'none' : '1px solid var(--line)', background: categorieSel === val ? 'var(--accent)' : 'var(--surface)', color: categorieSel === val ? 'var(--on-accent)' : 'var(--ink-70)' }}>{label}</button>
+                ))}
+              </div>
+            )}
             {succes && (
               <div style={{ padding: '12px 16px', borderRadius: '12px', background: 'var(--success-tint)', border: '1px solid var(--success-line)', color: 'var(--success)', fontSize: '13.5px', textAlign: 'center', marginBottom: '16px', fontWeight: 600 }}>{succes}</div>
             )}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(170px,1fr))', gap: '14px' }}>
               {produitsAffiches.length === 0 && (
                 <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '40px 0', color: 'var(--ink-45)', fontSize: '13.5px' }}>
-                  Aucun article ne correspond à « {recherche} ».
+                  {recherche ? <>Aucun article ne correspond à « {recherche} ».</> : 'Aucun article dans cette catégorie.'}
                 </div>
               )}
-              {produitsAffiches.map(produit => {
+              {groupes.map(({ base, variantes }) => variantes.length > 1 ? (() => {
+                const image = variantes.find(v => v.image)?.image;
+                const prixMin = Math.min(...variantes.map(v => v.prix)), prixMax = Math.max(...variantes.map(v => v.prix));
+                const dispo = variantes.reduce((n, v) => n + Math.max(0, v.stock_restant - (panier.find(x => x.id === v.id)?.quantite ?? 0)), 0);
+                const qteGroupe = variantes.reduce((n, v) => n + (panier.find(x => x.id === v.id)?.quantite ?? 0), 0);
+                return (
+                  <div key={`g-${base}`} style={{ gridColumn: isMobile ? '1 / -1' : 'span 2', display: 'flex', gap: '12px', padding: '14px', borderRadius: '16px', background: 'var(--surface)', border: `1px solid ${qteGroupe > 0 ? 'var(--accent-30)' : 'var(--line)'}`, opacity: dispo === 0 && qteGroupe === 0 ? 0.55 : 1 }}>
+                    {image ? (
+                      <img src={image} alt={base} style={{ width: '84px', height: '84px', objectFit: 'cover', borderRadius: '12px', flexShrink: 0 }} />
+                    ) : (
+                      <div style={{ width: '84px', height: '84px', flexShrink: 0, borderRadius: '12px', background: 'var(--img-empty)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--line)' }}>
+                        <span className="ms" style={{ fontSize: '32px', color: 'var(--accent-30)' }}>image</span>
+                      </div>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--ink)', lineHeight: 1.3 }}>{base}</div>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent)', margin: '2px 0 8px' }}>
+                        {prixMin === prixMax ? `${prixMin.toLocaleString()} FCFA` : `${prixMin.toLocaleString()} – ${prixMax.toLocaleString()} FCFA`}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        {variantes.map(v => {
+                          const q = panier.find(x => x.id === v.id)?.quantite ?? 0;
+                          const reste = v.stock_restant - q;
+                          const epuise = v.stock_restant === 0;
+                          return (
+                            <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', opacity: epuise ? 0.5 : 1 }}>
+                              <span style={{ flex: 1, minWidth: 0, fontSize: '12.5px', fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {libelleVariante(v) || v.nom}
+                                <span style={{ fontWeight: 500, color: epuise ? 'var(--danger)' : reste <= 2 ? 'var(--warn)' : 'var(--ink-45)', marginLeft: '6px' }}>{epuise ? 'épuisé' : `${reste} dispo`}</span>
+                              </span>
+                              {prixMin !== prixMax && <span style={{ fontSize: '11.5px', color: 'var(--ink-55)' }}>{v.prix.toLocaleString()}</span>}
+                              {q > 0 && (
+                                <>
+                                  <button onClick={() => retirerDuPanier(v.id)} aria-label={`Retirer un ${v.nom}`} style={{ width: '26px', height: '26px', borderRadius: '8px', border: 'none', cursor: 'pointer', background: 'var(--accent-16)', color: 'var(--accent-deep)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    <span className="ms" style={{ fontSize: '15px' }}>remove</span>
+                                  </button>
+                                  <span style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--accent-deep)', minWidth: '14px', textAlign: 'center' }}>{q}</span>
+                                </>
+                              )}
+                              <button onClick={() => ajouterAuPanier(v)} disabled={epuise || q >= v.stock_restant} aria-label={`Ajouter un ${v.nom}`} style={{ width: '28px', height: '28px', borderRadius: '9px', border: 'none', cursor: epuise || q >= v.stock_restant ? 'not-allowed' : 'pointer', background: epuise || q >= v.stock_restant ? 'var(--surface-inset)' : 'var(--accent-grad)', color: epuise || q >= v.stock_restant ? 'var(--ink-25)' : 'var(--on-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <span className="ms" style={{ fontSize: '17px' }}>add</span>
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })() : (() => {
+                const produit = variantes[0];
                 const dansLePanier = panier.find(p => p.id === produit.id);
                 const qte = dansLePanier?.quantite ?? 0;
                 const stockRestant = produit.stock_restant - qte;
@@ -414,7 +476,7 @@ export default function VendeusePage() {
                     </div>
                   </div>
                 );
-              })}
+              })())}
             </div>
           </div>
 
