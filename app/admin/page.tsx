@@ -26,6 +26,7 @@ export default function AdminDashboard() {
   const [caParMode, setCaParMode] = useState<{ mode: string; total: number }[]>([]);
   const [produitsCa, setProduitsCa] = useState<{ nom: string; quantite: number; ca: number }[]>([]);
   const [marge, setMarge] = useState({ beneficeMois: 0, caCouvertMois: 0, beneficeMoisPrec: 0 });
+  const [depenses, setDepenses] = useState({ mois: 0, moisPrec: 0 });
   const [produitsMarge, setProduitsMarge] = useState<{ nom: string; quantite: number; ca: number; benefice: number }[]>([]);
   const [periode, setPeriode] = useState<{ id: number | null; nom: string; debut: string | null }>({ id: null, nom: 'Période en cours', debut: null });
   const [clotureOuverte, setClotureOuverte] = useState(false);
@@ -78,6 +79,7 @@ export default function AdminDashboard() {
     setProduitsCa((d.produits_ca || []).map((p: any) => ({ nom: p.nom, quantite: Number(p.quantite) || 0, ca: Number(p.ca) || 0 })));
     const m = d.marge || {};
     setMarge({ beneficeMois: Number(m.benefice_mois) || 0, caCouvertMois: Number(m.ca_couvert_mois) || 0, beneficeMoisPrec: Number(m.benefice_mois_prec) || 0 });
+    setDepenses({ mois: Number(d.depenses?.mois) || 0, moisPrec: Number(d.depenses?.mois_prec) || 0 });
     setProduitsMarge((d.produits_marge || []).map((p: any) => ({ nom: p.nom, quantite: Number(p.quantite) || 0, ca: Number(p.ca) || 0, benefice: Number(p.benefice) || 0 })));
     const pr = d.periode || {};
     setPeriode({ id: pr.id ?? null, nom: pr.nom || 'Période en cours', debut: pr.debut || null });
@@ -145,15 +147,18 @@ export default function AdminDashboard() {
       </div>
 
       {/* Ce mois-ci — comparatif vs mois précédent */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: '18px', marginBottom: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: '18px', marginBottom: '24px' }}>
         {[
           { label: `Chiffre d'affaires — ${moisLabel()}`, unit: 'FCFA', courant: comparatif.caMois, precedent: comparatif.caMoisPrec },
           { label: `Ventes — ${moisLabel()}`, unit: 'ventes', courant: comparatif.nbMois, precedent: comparatif.nbMoisPrec },
-          { label: `Bénéfice — ${moisLabel()}`, unit: 'FCFA', courant: marge.beneficeMois, precedent: marge.beneficeMoisPrec,
+          { label: `Bénéfice brut — ${moisLabel()}`, unit: 'FCFA', courant: marge.beneficeMois, precedent: marge.beneficeMoisPrec,
             // Le benefice ne compte que les produits dont le prix d'achat est renseigne.
             note: comparatif.caMois > 0 && marge.caCouvertMois < comparatif.caMois
               ? `Calculé sur ${Math.round((marge.caCouvertMois / comparatif.caMois) * 100)} % du CA — renseignez les prix d'achat dans Produits`
               : comparatif.caMois > 0 ? `Marge : ${Math.round((marge.beneficeMois / comparatif.caMois) * 100)} % du CA` : undefined },
+          // Benefice net = benefice des ventes - depenses du mois (page Depenses).
+          { label: `Bénéfice net — ${moisLabel()}`, unit: 'FCFA', courant: marge.beneficeMois - depenses.mois, precedent: marge.beneficeMoisPrec - depenses.moisPrec,
+            note: depenses.mois > 0 ? `Après ${depenses.mois.toLocaleString()} FCFA de dépenses` : 'Aucune dépense saisie ce mois-ci' },
         ].map((s: { label: string; unit: string; courant: number; precedent: number; note?: string }) => {
           const delta = calculerDelta(s.courant, s.precedent);
           const positif = delta !== null && delta >= 0;
@@ -172,7 +177,7 @@ export default function AdminDashboard() {
                 <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--accent)' }}>{s.unit}</span>
               </div>
               <div style={{ marginTop: '4px', fontSize: '12px', color: 'var(--ink-45)' }}>Mois précédent : {s.precedent.toLocaleString()} {s.unit}</div>
-              {s.note && <div style={{ marginTop: '4px', fontSize: '11.5px', color: s.note.startsWith('Calculé') ? 'var(--warn)' : 'var(--success)' }}>{s.note}</div>}
+              {s.note && <div style={{ marginTop: '4px', fontSize: '11.5px', color: s.note.startsWith('Calculé') ? 'var(--warn)' : s.note.startsWith('Marge') ? 'var(--success)' : 'var(--ink-45)' }}>{s.note}</div>}
             </div>
           );
         })}

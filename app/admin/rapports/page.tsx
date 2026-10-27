@@ -11,6 +11,7 @@ const fmtDate = (s: string | Date) => new Date(s).toLocaleDateString('fr-FR', { 
 
 export default function AdminRapports() {
   const [ventes, setVentes] = useState<any[]>([]);
+  const [depenses, setDepenses] = useState<{ date_depense: string; categorie: string; libelle: string | null; montant: number }[]>([]);
   const [periodes, setPeriodes] = useState<any[]>([]);
   const [periodeSel, setPeriodeSel] = useState<string>('active'); // 'active' | 'all' | id
   const [chargement, setChargement] = useState(true);
@@ -20,6 +21,9 @@ export default function AdminRapports() {
   const chargerDonnees = async () => {
     const { data: per } = await supabase.from('periodes').select('*').order('debut', { ascending: false });
     setPeriodes(per || []);
+    type LigneDepense = { date_depense: string; categorie: string; libelle: string | null; montant: number };
+    const dep = await toutLire<LigneDepense>(() => supabase.from('depenses').select('date_depense, categorie, libelle, montant').order('date_depense', { ascending: false }).order('id')).catch(() => [] as LigneDepense[]);
+    setDepenses(dep.map(d => ({ ...d, montant: Number(d.montant) || 0 })));
     const ventesData = await toutLire(() => supabase.from('ventes').select('*').eq('annulee', false).order('date_vente', { ascending: false }).order('id', { ascending: false }));
     if (ventesData.length === 0) { setVentes([]); setChargement(false); return; }
     const venteIds = ventesData.map((v: any) => v.id);
@@ -73,6 +77,14 @@ export default function AdminRapports() {
   };
 
   const totalVentes = ventesFiltrees.reduce((s, v) => s + v.total, 0);
+  // Depenses de la periode, comparees en date locale (date_depense est une date sans heure).
+  const jourLocal = (d: string | Date) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
+  const debutDepenses = periodeSel !== 'all' && periodeChoisie ? jourLocal(periodeChoisie.debut) : null;
+  const finDepenses = periodeSel !== 'all' && periodeChoisie?.fin ? jourLocal(periodeChoisie.fin) : null;
+  const depensesFiltrees = depenses.filter(d => (!debutDepenses || d.date_depense >= debutDepenses) && (!finDepenses || d.date_depense < finDepenses));
+  const totalDepenses = depensesFiltrees.reduce((s, d) => s + d.montant, 0);
+  const depensesParCategorie = () => Object.entries(depensesFiltrees.reduce<Record<string, number>>((acc, d) => { acc[d.categorie] = (acc[d.categorie] || 0) + d.montant; return acc; }, {})).sort((a, b) => b[1] - a[1]);
+
   const totalEncaisse = ventesFiltrees.reduce((s, v) => s + v.montant_paye, 0);
   const totalEnAttente = ventesFiltrees.reduce((s, v) => s + v.reste_a_payer, 0);
   const slug = libellePeriode.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'periode';
@@ -105,6 +117,14 @@ export default function AdminRapports() {
     saveAs(new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })]), `rapport_paiements_${slug}.xlsx`);
   };
 
+  const exporterDepenses = () => {
+    const data = depensesFiltrees.map(d => ({ 'Date': fmtDate(`${d.date_depense}T12:00:00`), 'Categorie': d.categorie, 'Detail': d.libelle || '', 'Montant (FCFA)': d.montant }));
+    data.push({ 'Date': '', 'Categorie': 'TOTAL', 'Detail': '', 'Montant (FCFA)': totalDepenses });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Depenses');
+    saveAs(new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })]), `rapport_depenses_${slug}.xlsx`);
+  };
+
   // ── Récap PDF de la période ──
   const genererPdf = async () => {
     const { jsPDF } = await import('jspdf');
@@ -127,6 +147,7 @@ export default function AdminRapports() {
     ligne('Chiffre d\'affaires', `${fmt(totalVentes)} FCFA`, true);
     ligne('Encaissé', `${fmt(totalEncaisse)} FCFA`);
     ligne('Reste à encaisser', `${fmt(totalEnAttente)} FCFA`);
+    ligne('Dépenses', `${fmt(totalDepenses)} FCFA`);
 
     titreSection('Par vendeuse');
     const pv = parVendeuse();
@@ -138,6 +159,11 @@ export default function AdminRapports() {
     if (pp.length === 0) ligne('—', '');
     else pp.forEach(p => ligne(`${p.nom}  ×${p.quantite}`, `${fmt(p.total)} FCFA`));
 
+    titreSection('Dépenses par catégorie');
+    const dc = depensesParCategorie();
+    if (dc.length === 0) ligne('—', '');
+    else dc.forEach(([cat, montant]) => ligne(cat, `${fmt(montant)} FCFA`));
+
     titreSection('Par mode de paiement');
     const m = parMode();
     Object.entries(m).forEach(([mode, tot]) => ligne(MODE_LABELS[mode] || mode, `${fmt(tot)} FCFA`));
@@ -146,9 +172,10 @@ export default function AdminRapports() {
   };
 
   const CARDS = [
-    { icon: 'picture_as_pdf', title: 'Récapitulatif PDF', desc: 'Synthèse de la période : totaux, par vendeuse, par produit et par mode de paiement. À télécharger/imprimer avant de clôturer.', onClick: genererPdf, cta: 'Télécharger le PDF', pdf: true },
+    { icon: 'picture_as_pdf', title: 'Récapitulatif PDF', desc: 'Synthèse de la période : totaux, dépenses, par vendeuse, par produit et par mode de paiement. À télécharger/imprimer avant de clôturer.', onClick: genererPdf, cta: 'Télécharger le PDF', pdf: true },
     { icon: 'groups', title: 'Rapport par vendeuse', desc: 'Ventes, transactions et détails pour chaque vendeuse sur la période.', onClick: exporterParVendeuse, cta: 'Télécharger Excel' },
     { icon: 'inventory_2', title: 'Rapport par produit', desc: 'Quantités vendues et chiffre d\'affaires article par article.', onClick: exporterParProduit, cta: 'Télécharger Excel' },
+    { icon: 'payments', title: 'Rapport des dépenses', desc: 'Toutes les dépenses de la période : date, catégorie, détail et total.', onClick: exporterDepenses, cta: 'Télécharger Excel' },
     { icon: 'account_balance_wallet', title: 'Rapport par paiement', desc: 'Encaissements par mode : espèces, Mobile Money, Orange Money.', onClick: exporterParPaiement, cta: 'Télécharger Excel' },
   ];
 
@@ -170,6 +197,7 @@ export default function AdminRapports() {
           { label: 'Total ventes', value: totalVentes.toLocaleString(), color: 'var(--ink)' },
           { label: 'Encaissé', value: totalEncaisse.toLocaleString(), color: 'var(--success)' },
           { label: 'En attente', value: totalEnAttente.toLocaleString(), color: 'var(--warn)' },
+          { label: 'Dépenses', value: totalDepenses.toLocaleString(), color: 'var(--danger)' },
         ].map(s => (
           <div key={s.label} style={{ padding: '20px', borderRadius: '18px', background: 'var(--surface)', border: '1px solid var(--accent-12)', textAlign: 'center' }}>
             <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '.5px', color: 'var(--ink-55)', textTransform: 'uppercase', marginBottom: '8px' }}>{s.label}</div>
