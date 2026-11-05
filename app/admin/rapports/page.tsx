@@ -9,6 +9,10 @@ const MODE_LABELS: Record<string, string> = { cash: 'Espèces', mobile_money: 'M
 const fmt = (n: number) => n.toLocaleString('fr-FR').replace(/[  ]/g, ' ');
 const fmtDate = (s: string | Date) => new Date(s).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
 
+// Une vente en ligne (commande du site) n'a pas de vendeuse : elle est rangee sous « Site web ».
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const nomVendeuse = (v: any): string => v.utilisateurs?.nom || (v.canal === 'en_ligne' ? 'Site web' : 'Inconnu');
+
 export default function AdminRapports() {
   const [ventes, setVentes] = useState<any[]>([]);
   const [depenses, setDepenses] = useState<{ date_depense: string; categorie: string; libelle: string | null; montant: number }[]>([]);
@@ -61,7 +65,7 @@ export default function AdminRapports() {
   // ── Agregats reutilises par Excel et PDF ──
   const parVendeuse = () => {
     const map: Record<string, { nb: number; total: number }> = {};
-    ventesFiltrees.forEach(v => { const nom = v.utilisateurs?.nom || 'Inconnu'; if (!map[nom]) map[nom] = { nb: 0, total: 0 }; map[nom].nb += 1; map[nom].total += v.total; });
+    ventesFiltrees.forEach(v => { const nom = nomVendeuse(v); if (!map[nom]) map[nom] = { nb: 0, total: 0 }; map[nom].nb += 1; map[nom].total += v.total; });
     return Object.entries(map).map(([nom, s]) => ({ nom, ...s })).sort((a, b) => b.total - a.total);
   };
   const parProduit = () => {
@@ -92,7 +96,7 @@ export default function AdminRapports() {
   const exporterParVendeuse = () => {
     const map: any = {};
     ventesFiltrees.forEach(v => {
-      const nom = v.utilisateurs?.nom || 'Inconnu';
+      const nom = nomVendeuse(v);
       if (!map[nom]) map[nom] = [];
       map[nom].push({ 'Date': new Date(v.date_vente).toLocaleString('fr-FR'), 'Cliente': v.clientes?.nom || '', 'Telephone': v.clientes?.telephone || '', 'Total (FCFA)': v.total, 'Montant Paye (FCFA)': v.montant_paye, 'Reste a Payer (FCFA)': v.reste_a_payer, 'Statut': v.statut_paiement === 'paye' ? 'Paye' : 'Partiel' });
     });
@@ -115,6 +119,29 @@ export default function AdminRapports() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Paiements');
     saveAs(new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })]), `rapport_paiements_${slug}.xlsx`);
+  };
+
+  // Boutique / site web : nombre de ventes et chiffre d'affaires, puis le detail des ventes en ligne.
+  const exporterParCanal = () => {
+    const canal = (v: { canal?: string }) => (v.canal === 'en_ligne' ? 'Site web' : 'Boutique');
+    const resume = ['Boutique', 'Site web'].map(c => {
+      const vs = ventesFiltrees.filter(v => canal(v) === c);
+      return { 'Canal': c, 'Ventes': vs.length, 'Total (FCFA)': vs.reduce((s, v) => s + v.total, 0) };
+    });
+    resume.push({ 'Canal': 'TOTAL', 'Ventes': ventesFiltrees.length, 'Total (FCFA)': totalVentes });
+    const enLigne = ventesFiltrees.filter(v => v.canal === 'en_ligne').map(v => ({
+      'Date': new Date(v.date_vente).toLocaleString('fr-FR'),
+      'Commande': v.reference_site || '',
+      'Cliente': v.clientes?.nom || '',
+      'Telephone': v.clientes?.telephone || '',
+      'Produits': (v.vente_produits || []).map((vp: { quantite: number; produits?: { nom: string } }) => `${vp.quantite} x ${vp.produits?.nom || ''}`).join(', '),
+      'Total (FCFA)': v.total,
+      'Paiement': (v.paiements || []).map((p: { mode: string }) => MODE_LABELS[p.mode] || p.mode).join(', '),
+    }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resume), 'Par canal');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(enLigne.length ? enLigne : [{ 'Commande': 'Aucune vente en ligne sur la période' }]), 'Ventes en ligne');
+    saveAs(new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })]), `rapport_canaux_${slug}.xlsx`);
   };
 
   const exporterDepenses = () => {
@@ -174,6 +201,7 @@ export default function AdminRapports() {
   const CARDS = [
     { icon: 'picture_as_pdf', title: 'Récapitulatif PDF', desc: 'Synthèse de la période : totaux, dépenses, par vendeuse, par produit et par mode de paiement. À télécharger/imprimer avant de clôturer.', onClick: genererPdf, cta: 'Télécharger le PDF', pdf: true },
     { icon: 'groups', title: 'Rapport par vendeuse', desc: 'Ventes, transactions et détails pour chaque vendeuse sur la période.', onClick: exporterParVendeuse, cta: 'Télécharger Excel' },
+    { icon: 'language', title: 'Boutique / site web', desc: 'Chiffre d\'affaires de la boutique et du site, avec le détail des commandes en ligne.', onClick: exporterParCanal, cta: 'Télécharger Excel' },
     { icon: 'inventory_2', title: 'Rapport par produit', desc: 'Quantités vendues et chiffre d\'affaires article par article.', onClick: exporterParProduit, cta: 'Télécharger Excel' },
     { icon: 'payments', title: 'Rapport des dépenses', desc: 'Toutes les dépenses de la période : date, catégorie, détail et total.', onClick: exporterDepenses, cta: 'Télécharger Excel' },
     { icon: 'account_balance_wallet', title: 'Rapport par paiement', desc: 'Encaissements par mode : espèces, Mobile Money, Orange Money.', onClick: exporterParPaiement, cta: 'Télécharger Excel' },
@@ -195,6 +223,7 @@ export default function AdminRapports() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: '16px', marginBottom: '28px' }}>
         {[
           { label: 'Total ventes', value: totalVentes.toLocaleString(), color: 'var(--ink)' },
+          { label: 'Dont site web', value: ventesFiltrees.filter(v => v.canal === 'en_ligne').reduce((s, v) => s + v.total, 0).toLocaleString(), color: 'var(--accent)' },
           { label: 'Encaissé', value: totalEncaisse.toLocaleString(), color: 'var(--success)' },
           { label: 'En attente', value: totalEnAttente.toLocaleString(), color: 'var(--warn)' },
           { label: 'Dépenses', value: totalDepenses.toLocaleString(), color: 'var(--danger)' },
