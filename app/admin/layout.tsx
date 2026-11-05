@@ -10,6 +10,7 @@ import ChangerMotDePasse from '../components/ChangerMotDePasse';
 const NAV = [
   { href: '/admin', icon: 'dashboard', label: 'Tableau de bord' },
   { href: '/admin/produits', icon: 'inventory_2', label: 'Produits' },
+  { href: '/admin/site', icon: 'language', label: 'Site web' },
   { href: '/admin/ventes', icon: 'receipt_long', label: 'Ventes' },
   { href: '/admin/vendeuses', icon: 'emoji_events', label: 'Vendeuses' },
   { href: '/admin/clients', icon: 'people', label: 'Clientes' },
@@ -22,6 +23,7 @@ const NAV = [
 const TITRES: Record<string, [string, string]> = {
   '/admin': ['Tableau de bord', "Vue d'ensemble de votre activité"],
   '/admin/produits': ['Gestion des produits', 'Catalogue et niveaux de stock'],
+  '/admin/site': ['Site web', 'Liaison des produits et du stock avec fallora-web'],
   '/admin/ventes': ['Ventes', 'Historique des transactions'],
   '/admin/vendeuses': ['Performance des vendeuses', 'Classement et statistiques du mois'],
   '/admin/clients': ['Clientes', 'Profils et historique des achats'],
