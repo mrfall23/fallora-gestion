@@ -23,6 +23,8 @@ export default function AdminDashboard() {
   const [topVendeuses, setTopVendeuses] = useState<any[]>([]);
   const [stockBas, setStockBas] = useState<any[]>([]);
   const [comparatif, setComparatif] = useState({ caMois: 0, nbMois: 0, caMoisPrec: 0, nbMoisPrec: 0 });
+  // Part du site fallora-web (ventes en ligne) dans le chiffre d'affaires du mois.
+  const [enLigne, setEnLigne] = useState({ caMois: 0, nbMois: 0, caMoisPrec: 0 });
   const [caParMode, setCaParMode] = useState<{ mode: string; total: number }[]>([]);
   const [produitsCa, setProduitsCa] = useState<{ nom: string; quantite: number; ca: number }[]>([]);
   const [marge, setMarge] = useState({ beneficeMois: 0, caCouvertMois: 0, beneficeMoisPrec: 0 });
@@ -71,6 +73,8 @@ export default function AdminDashboard() {
       id: v.id, nom: v.nom, nb: Number(v.nb) || 0, total: Number(v.total) || 0,
     })));
     const c = d.comparatif || {};
+    const cx = d.canaux || {};
+    setEnLigne({ caMois: Number(cx.ca_en_ligne_mois) || 0, nbMois: Number(cx.nb_en_ligne_mois) || 0, caMoisPrec: Number(cx.ca_en_ligne_mois_prec) || 0 });
     setComparatif({
       caMois: Number(c.ca_mois) || 0, nbMois: Number(c.nb_mois) || 0,
       caMoisPrec: Number(c.ca_mois_prec) || 0, nbMoisPrec: Number(c.nb_mois_prec) || 0,
@@ -149,7 +153,8 @@ export default function AdminDashboard() {
       {/* Ce mois-ci — comparatif vs mois précédent */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: '18px', marginBottom: '24px' }}>
         {[
-          { label: `Chiffre d'affaires — ${moisLabel()}`, unit: 'FCFA', courant: comparatif.caMois, precedent: comparatif.caMoisPrec },
+          { label: `Chiffre d'affaires — ${moisLabel()}`, unit: 'FCFA', courant: comparatif.caMois, precedent: comparatif.caMoisPrec,
+            note: enLigne.caMois > 0 ? `Boutique ${(comparatif.caMois - enLigne.caMois).toLocaleString()} · Site web ${enLigne.caMois.toLocaleString()} FCFA (${enLigne.nbMois} vente${enLigne.nbMois > 1 ? 's' : ''})` : undefined },
           { label: `Ventes — ${moisLabel()}`, unit: 'ventes', courant: comparatif.nbMois, precedent: comparatif.nbMoisPrec },
           { label: `Bénéfice brut — ${moisLabel()}`, unit: 'FCFA', courant: marge.beneficeMois, precedent: marge.beneficeMoisPrec,
             // Le benefice ne compte que les produits dont le prix d'achat est renseigne.
