@@ -21,6 +21,7 @@ type Paiement = { id: number; montant: number; mode: string; date_paiement: stri
 type Vente = {
   id: number; date_vente: string; total: number; remise: number | null; remise_motif: string | null; montant_paye: number; reste_a_payer: number; statut_paiement: string;
   annulee: boolean; annulee_le: string | null; motif_annulation: string | null; vendeuse_id: number | null;
+  canal?: string | null; reference_site?: string | null; // vente en ligne : commande du site (FA-1001…)
   clienteNom: string | null; clienteTelephone: string | null; vendeuseNom: string | null;
   lignes: Ligne[]; paiements: Paiement[];
 };
@@ -87,7 +88,7 @@ export default function AdminVentes() {
         ...v,
         clienteNom: cMap.get(v.cliente_id)?.nom || null,
         clienteTelephone: cMap.get(v.cliente_id)?.telephone || null,
-        vendeuseNom: uMap.get(v.vendeuse_id)?.nom || null,
+        vendeuseNom: uMap.get(v.vendeuse_id)?.nom || (v.canal === 'en_ligne' ? 'Site web' : null),
         lignes: lignesPar.get(v.id) || [],
         paiements: (paiementsPar.get(v.id) || []).sort((a, b) => a.date_paiement.localeCompare(b.date_paiement)),
       })));
@@ -111,12 +112,12 @@ export default function AdminVentes() {
       if (statut === 'actives' && v.annulee) return false;
       if (statut === 'annulees' && !v.annulee) return false;
       if ((statut === 'paye' || statut === 'partiel') && (v.annulee || v.statut_paiement !== statut)) return false;
-      if (vendeuse !== 'toutes' && String(v.vendeuse_id) !== vendeuse) return false;
+      if (vendeuse === 'site' ? v.canal !== 'en_ligne' : vendeuse !== 'toutes' && String(v.vendeuse_id) !== vendeuse) return false;
       const d = new Date(v.date_vente);
       if (debut && d < debut) return false;
       if (fin && d >= fin) return false;
       if (q) {
-        const texte = [v.clienteNom, v.clienteTelephone, v.vendeuseNom, String(v.id), ...v.lignes.map(l => l.nom)].filter(Boolean).join(' ').toLowerCase();
+        const texte = [v.clienteNom, v.clienteTelephone, v.vendeuseNom, String(v.id), v.reference_site, ...v.lignes.map(l => l.nom)].filter(Boolean).join(' ').toLowerCase();
         if (!texte.includes(q)) return false;
       }
       return true;
@@ -176,6 +177,7 @@ export default function AdminVentes() {
         </select>
         <select value={vendeuse} onChange={e => { setVendeuse(e.target.value); setLimite(PAR_PAGE); }} style={champ} aria-label="Vendeuse">
           <option value="toutes">Toutes les vendeuses</option>
+          <option value="site">🌐 Site web (ventes en ligne)</option>
           {vendeuses.map(([id, nom]) => <option key={id} value={String(id)}>{nom}</option>)}
         </select>
         <select value={statut} onChange={e => { setStatut(e.target.value); setLimite(PAR_PAGE); }} style={champ} aria-label="Statut">
@@ -226,7 +228,7 @@ export default function AdminVentes() {
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: '14.5px', fontWeight: 600, color: 'var(--ink)', textDecoration: v.annulee ? 'line-through' : undefined }}>{v.clienteNom || 'Inconnue'}</div>
-                  <div style={{ fontSize: '11.5px', color: 'var(--ink-45)' }}>N° {v.id}{v.clienteTelephone ? ` · ${v.clienteTelephone}` : ''}</div>
+                  <div style={{ fontSize: '11.5px', color: 'var(--ink-45)' }}>N° {v.id}{v.reference_site ? ` · 🌐 ${v.reference_site}` : ''}{v.clienteTelephone ? ` · ${v.clienteTelephone}` : ''}</div>
                 </div>
               </div>
               <div style={{ fontSize: '14px', color: 'var(--ink-70)' }}>{v.vendeuseNom || '—'}</div>
