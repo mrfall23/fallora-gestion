@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { toutLire, lireParIds } from '@/lib/requetes';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
+import { telechargerPdfTableau, type Section } from './pdfTableau';
 
 const MODE_LABELS: Record<string, string> = { cash: 'Espèces', mobile_money: 'Mobile Money', orange_money: 'Orange Money' };
 const fmt = (n: number) => n.toLocaleString('fr-FR').replace(/[  ]/g, ' ');
@@ -152,6 +153,95 @@ export default function AdminRapports() {
     saveAs(new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })]), `rapport_depenses_${slug}.xlsx`);
   };
 
+  // ── Rapports en PDF (tableaux) ; l'Excel reste disponible en lien secondaire ──
+  const plagePdf = periodeChoisie ? `${fmtDate(periodeChoisie.debut)} — ${periodeChoisie.fin ? fmtDate(periodeChoisie.fin) : 'en cours'}` : 'Toutes les ventes';
+  const pdf = (titre: string, sections: Section[], fichier: string, paysage = false) =>
+    telechargerPdfTableau({ titre, periode: libellePeriode, plage: plagePdf, sections, fichier: `${fichier}_${slug}.pdf`, paysage });
+  const F = (n: number) => `${fmt(Number(n) || 0)} FCFA`;
+  const dateHeure = (d: string) => new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+  const pdfParVendeuse = () => {
+    const pv = parVendeuse();
+    const sections: Section[] = [{
+      titre: 'Résumé',
+      colonnes: [{ titre: 'Vendeuse', largeur: 60 }, { titre: 'Ventes', largeur: 20, droite: true }, { titre: 'Total', largeur: 40, droite: true }],
+      lignes: pv.map(v => [v.nom, String(v.nb), F(v.total)]),
+      total: ['TOTAL', String(ventesFiltrees.length), F(totalVentes)],
+    }];
+    pv.forEach(({ nom }) => {
+      const vs = ventesFiltrees.filter(v => nomVendeuse(v) === nom);
+      sections.push({
+        titre: nom,
+        colonnes: [{ titre: 'Date', largeur: 26 }, { titre: 'Cliente', largeur: 40 }, { titre: 'Téléphone', largeur: 28 }, { titre: 'Total', largeur: 26, droite: true }, { titre: 'Payé', largeur: 26, droite: true }, { titre: 'Reste', largeur: 24, droite: true }],
+        lignes: vs.map(v => [dateHeure(v.date_vente), v.clientes?.nom || '', v.clientes?.telephone || '', F(v.total), F(v.montant_paye), F(v.reste_a_payer)]),
+        total: ['', '', 'Total', F(vs.reduce((a, v) => a + v.total, 0)), F(vs.reduce((a, v) => a + v.montant_paye, 0)), F(vs.reduce((a, v) => a + v.reste_a_payer, 0))],
+      });
+    });
+    return pdf('Rapport par vendeuse', sections, 'rapport_vendeuses', true);
+  };
+
+  const pdfParCanal = () => {
+    const canal = (v: { canal?: string }) => (v.canal === 'en_ligne' ? 'Site web' : 'Boutique');
+    const enLigne = ventesFiltrees.filter(v => v.canal === 'en_ligne');
+    return pdf('Boutique / site web', [
+      {
+        titre: 'Par canal',
+        colonnes: [{ titre: 'Canal', largeur: 60 }, { titre: 'Ventes', largeur: 20, droite: true }, { titre: 'Total', largeur: 40, droite: true }],
+        lignes: ['Boutique', 'Site web'].map(c => { const vs = ventesFiltrees.filter(v => canal(v) === c); return [c, String(vs.length), F(vs.reduce((a, v) => a + v.total, 0))]; }),
+        total: ['TOTAL', String(ventesFiltrees.length), F(totalVentes)],
+      },
+      {
+        titre: 'Commandes en ligne',
+        colonnes: [{ titre: 'Date', largeur: 24 }, { titre: 'Commande', largeur: 20 }, { titre: 'Cliente', largeur: 32 }, { titre: 'Produits', largeur: 64 }, { titre: 'Paiement', largeur: 26 }, { titre: 'Total', largeur: 26, droite: true }],
+        lignes: enLigne.map(v => [
+          dateHeure(v.date_vente), v.reference_site || '', v.clientes?.nom || '',
+          (v.vente_produits || []).map((vp: { quantite: number; produits?: { nom: string } }) => `${vp.quantite} × ${vp.produits?.nom || ''}`).join(', '),
+          (v.paiements || []).map((p: { mode: string }) => MODE_LABELS[p.mode] || p.mode).join(', '),
+          F(v.total),
+        ]),
+        total: enLigne.length ? ['', '', '', '', 'Total', F(enLigne.reduce((a, v) => a + v.total, 0))] : undefined,
+        vide: 'Aucune vente en ligne sur la période.',
+      },
+    ], 'rapport_canaux', true);
+  };
+
+  const pdfParProduit = () => {
+    const pp = parProduit();
+    return pdf('Rapport par produit', [{
+      titre: 'Ventes par produit',
+      colonnes: [{ titre: 'Produit', largeur: 90 }, { titre: 'Quantité', largeur: 22, droite: true }, { titre: 'Total', largeur: 40, droite: true }],
+      lignes: pp.map(p => [p.nom, String(p.quantite), F(p.total)]),
+      total: ['TOTAL', String(pp.reduce((a, p) => a + p.quantite, 0)), F(pp.reduce((a, p) => a + p.total, 0))],
+    }], 'rapport_produits');
+  };
+
+  const pdfDepenses = () => pdf('Rapport des dépenses', [
+    {
+      titre: 'Par catégorie',
+      colonnes: [{ titre: 'Catégorie', largeur: 90 }, { titre: 'Montant', largeur: 40, droite: true }],
+      lignes: depensesParCategorie().map(([c, m]) => [c, F(m)]),
+      total: ['TOTAL', F(totalDepenses)],
+    },
+    {
+      titre: 'Détail',
+      colonnes: [{ titre: 'Date', largeur: 26 }, { titre: 'Catégorie', largeur: 36 }, { titre: 'Détail', largeur: 70 }, { titre: 'Montant', largeur: 30, droite: true }],
+      lignes: depensesFiltrees.map(d => [fmtDate(`${d.date_depense}T12:00:00`), d.categorie, d.libelle || '', F(d.montant)]),
+      total: ['', '', 'Total', F(totalDepenses)],
+      vide: 'Aucune dépense sur la période.',
+    },
+  ], 'rapport_depenses');
+
+  const pdfParPaiement = () => {
+    const m = parMode();
+    const total = Object.values(m).reduce((a, b) => a + b, 0);
+    return pdf('Rapport par paiement', [{
+      titre: 'Encaissements par mode de paiement',
+      colonnes: [{ titre: 'Mode', largeur: 90 }, { titre: 'Total', largeur: 40, droite: true }],
+      lignes: Object.entries(m).map(([mode, t]) => [MODE_LABELS[mode] || mode, F(t)]),
+      total: ['TOTAL', F(total)],
+    }], 'rapport_paiements');
+  };
+
   // ── Récap PDF de la période ──
   const genererPdf = async () => {
     const { jsPDF } = await import('jspdf');
@@ -200,12 +290,12 @@ export default function AdminRapports() {
 
   const CARDS = [
     { icon: 'picture_as_pdf', title: 'Récapitulatif PDF', desc: 'Synthèse de la période : totaux, dépenses, par vendeuse, par produit et par mode de paiement. À télécharger/imprimer avant de clôturer.', onClick: genererPdf, cta: 'Télécharger le PDF', pdf: true },
-    { icon: 'groups', title: 'Rapport par vendeuse', desc: 'Ventes, transactions et détails pour chaque vendeuse sur la période.', onClick: exporterParVendeuse, cta: 'Télécharger Excel' },
-    { icon: 'language', title: 'Boutique / site web', desc: 'Chiffre d\'affaires de la boutique et du site, avec le détail des commandes en ligne.', onClick: exporterParCanal, cta: 'Télécharger Excel' },
-    { icon: 'inventory_2', title: 'Rapport par produit', desc: 'Quantités vendues et chiffre d\'affaires article par article.', onClick: exporterParProduit, cta: 'Télécharger Excel' },
-    { icon: 'payments', title: 'Rapport des dépenses', desc: 'Toutes les dépenses de la période : date, catégorie, détail et total.', onClick: exporterDepenses, cta: 'Télécharger Excel' },
-    { icon: 'account_balance_wallet', title: 'Rapport par paiement', desc: 'Encaissements par mode : espèces, Mobile Money, Orange Money.', onClick: exporterParPaiement, cta: 'Télécharger Excel' },
-  ];
+    { icon: 'groups', title: 'Rapport par vendeuse', desc: 'Ventes, transactions et détails pour chaque vendeuse sur la période.', onClick: pdfParVendeuse, excel: exporterParVendeuse, cta: 'Télécharger le PDF', pdf: true },
+    { icon: 'language', title: 'Boutique / site web', desc: 'Chiffre d\'affaires de la boutique et du site, avec le détail des commandes en ligne.', onClick: pdfParCanal, excel: exporterParCanal, cta: 'Télécharger le PDF', pdf: true },
+    { icon: 'inventory_2', title: 'Rapport par produit', desc: 'Quantités vendues et chiffre d\'affaires article par article.', onClick: pdfParProduit, excel: exporterParProduit, cta: 'Télécharger le PDF', pdf: true },
+    { icon: 'payments', title: 'Rapport des dépenses', desc: 'Toutes les dépenses de la période : date, catégorie, détail et total.', onClick: pdfDepenses, excel: exporterDepenses, cta: 'Télécharger le PDF', pdf: true },
+    { icon: 'account_balance_wallet', title: 'Rapport par paiement', desc: 'Encaissements par mode : espèces, Mobile Money, Orange Money.', onClick: pdfParPaiement, excel: exporterParPaiement, cta: 'Télécharger le PDF', pdf: true },
+  ] as { icon: string; title: string; desc: string; onClick: () => void; excel?: () => void; cta: string; pdf?: boolean }[];
 
   return (
     <div className="fade-up">
@@ -258,6 +348,11 @@ export default function AdminRapports() {
                 <button onClick={r.onClick} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '9px', height: '48px', border: 'none', borderRadius: '14px', cursor: 'pointer', background: r.pdf ? 'var(--accent-grad)' : 'var(--success)', color: r.pdf ? 'var(--on-accent)' : '#fff', fontSize: '14.5px', fontWeight: 700, boxShadow: r.pdf ? 'var(--shadow-accent)' : 'none' }}>
                   <span className="ms" style={{ fontSize: '20px' }}>download</span>{r.cta}
                 </button>
+                {r.excel && (
+                  <button onClick={r.excel} style={{ marginTop: '10px', border: 'none', background: 'none', cursor: 'pointer', color: 'var(--ink-45)', fontSize: '12.5px', textDecoration: 'underline' }}>
+                    ou version Excel
+                  </button>
+                )}
               </div>
             ))}
           </div>
